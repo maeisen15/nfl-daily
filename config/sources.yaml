@@ -308,6 +308,7 @@ team_coverage:
         name: "Baltimore Ravens (Official)"
         enabled: true
         feed: true
+        feed_only: true   # marketing-heavy team account: show in Tweets feed, keep out of digest
       - handle: "ColeJacksonFB"
         name: "Cole Jackson"
         enabled: true

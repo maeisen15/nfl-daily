@@ -32,6 +32,11 @@ DEFAULT_SOURCES = os.path.expanduser(
 
 SCHEMA_VERSION = 1
 
+# Articles stay in the app's Articles tab this many hours (wider than the 24h digest window
+# so Matt can catch up on articles he didn't read the day they dropped). Override with
+# NFL_DAILY_ARTICLE_WINDOW_HOURS.
+ARTICLE_WINDOW_HOURS = 48
+
 TEAM_CODES = {
     "Arizona Cardinals": "ARI", "Atlanta Falcons": "ATL", "Baltimore Ravens": "BAL",
     "Buffalo Bills": "BUF", "Carolina Panthers": "CAR", "Chicago Bears": "CHI",
@@ -126,6 +131,10 @@ def build_items(run, primary_code, rival_codes):
     completed = parse_dt(run.get("completed_at")) or datetime.now(timezone.utc)
     window_hours = run.get("recency_hours_cap") or 24
     cutoff = completed - timedelta(hours=window_hours)
+    # Articles get a wider window so Matt can catch up on ones he didn't read the same day.
+    # Tweets, transactions, and injuries stay on the base (24h) window to match the digest.
+    article_window_hours = int(os.environ.get("NFL_DAILY_ARTICLE_WINDOW_HOURS", ARTICLE_WINDOW_HOURS))
+    article_cutoff = completed - timedelta(hours=article_window_hours)
     tracked = {primary_code} | set(rival_codes)
 
     items, seen = [], set()
@@ -169,11 +178,14 @@ def build_items(run, primary_code, rival_codes):
     for r in run.get("raw_items") or []:
         sid = r.get("source_id") or ""
         dt = parse_dt(r.get("published_at"))
-        if dt is None or dt < cutoff:
+        if dt is None:
             continue
-        rtype = STRUCTURED_TYPE_BY_SOURCE.get(sid)
         if sid.startswith("twitter_") or "_twitter_" in sid:
             continue  # tweet sources ride in via tweet_feeds
+        rtype = STRUCTURED_TYPE_BY_SOURCE.get(sid)
+        # Articles use the wider window; transactions/injuries stay on the base window.
+        if dt < (cutoff if rtype else article_cutoff):
+            continue
         if rtype:  # transaction / injury
             team_code, _ = find_team(r.get("title"))
             scopes = ["national"]
@@ -212,7 +224,7 @@ def build_items(run, primary_code, rival_codes):
             }, ("article", r.get("url")))
 
     items.sort(key=lambda i: i["published_at"], reverse=True)
-    return items, window_hours
+    return items, window_hours, article_window_hours
 
 
 def build_digest(run, primary, rivals):
@@ -253,7 +265,7 @@ def main():
     primary_code = primary.get("team_code", "BAL")
     rival_codes = [r.get("team_code") for r in rivals if r.get("team_code")]
 
-    items, window_hours = build_items(run, primary_code, rival_codes)
+    items, window_hours, article_window_hours = build_items(run, primary_code, rival_codes)
     for it in items:
         if not it["source_name"]:
             it["source_name"] = source_names.get(it["source_id"], it["source_id"])
@@ -291,6 +303,7 @@ def main():
         "run_id": run.get("run_id"),
         "generated_at": generated_at,
         "window_hours": window_hours,
+        "article_window_hours": article_window_hours,
         "counts": {t: sum(1 for i in items if i["type"] == t)
                    for t in ("tweet", "article", "transaction", "injury")},
         "items": items,
