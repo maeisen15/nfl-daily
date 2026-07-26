@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Transform an nfl-digest run log into the app's JSON data files.
+"""Transform a run log into the app's JSON data files.
 
-Reads:  a run log (default: newest ~/.nfl-digest/runs/*.json) + sources.yaml
+Reads:  a run log (default: newest runtime/runs/*.json) + config/sources.yaml
 Writes: web/data/config.json, web/data/feed.json, web/data/digest.json
 
 Usage:

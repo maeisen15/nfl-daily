@@ -1,10 +1,9 @@
-# NFL Daily Digest — source configuration (starter)
+# NFL Daily — source configuration
 #
-# This file lives at ~/.nfl-digest/sources.yaml at runtime.
-# Edit freely: add, remove, swap, toggle `enabled`. The orchestrator reads this on every run.
-#
-# Phase 2 wires the five news pages + The Ringer analysis.
-# Phase 3 adds structured-data (transactions/injuries). Phase 4 adds Twitter.
+# The orchestrator (pipeline/orchestrator.py) reads this on every run.
+# Edit freely: add, remove, swap, toggle `enabled`. When you add a source on a NEW domain,
+# also add that domain (apex + wildcard) to docs/network-allowlist.txt and to the cloud
+# routine's network allowlist, or the scheduled run will get a 403 fetching it.
 
 # ---- News pages ----------------------------------------------------------------------------
 news_sources:
@@ -158,18 +157,11 @@ podcasts:
     enabled: true
 
 # ---- Twitter ------------------------------------------------------------------------------
-# Twitter sources are shipped DISABLED by default in v1. To activate:
-#   1. Start Docker Desktop (or any Docker engine on the host).
-#   2. `docker run -d -p 1200:1200 --name rsshub diygod/rsshub`
-#   3. Smoke-test once: curl http://localhost:1200/twitter/user/AdamSchefter
-#   4. Flip the handles below to enabled: true and re-run the digest.
+# Tweets are fetched via twitterapi.io (twitter_path: "twitterapi_io" below). The API key is
+# TWITTERAPI_IO_KEY — an env var in the cloud routine, or ~/.nfl-digest/secrets.env locally.
+# (The rsshub/localhost path is legacy and inactive; twitter_endpoint is only read for it.)
 #
-# After ~5 days of polls, run `python3 ~/.claude/skills/nfl-digest/scripts/twitter_reliability_check.py`
-# to evaluate whether rsshub is hitting the reliability bar (≥90% successful polls, no missed
-# major scoops). If not, switch twitter_path to "twitterapi_io" and add TWITTERAPI_IO_KEY to
-# ~/.nfl-digest/secrets.env per the Implementation Plan's Twitter decision tree.
-#
-# Per-handle feed flags (tweet-feed feature, added 2026-05-25):
+# Per-handle feed flags:
 #   feed:      true → tweets surface in the per-tab Tweet Feed UI (default: true)
 #   feed_only: true → tweets ONLY appear in the feed and are NOT passed to digest synthesis
 #                     (default: false → "dual-use": feed AND synthesis)

@@ -9,7 +9,6 @@
 #
 # When you add a new source to config/sources.yaml, add its domain here (both forms) too, or
 # the cloud run will get a 403 at the proxy and that source will show "error" in source health.
-# Regenerate this list anytime with the domain-extraction snippet in docs/PLAN.md notes.
 
 acast.com
 *.acast.com

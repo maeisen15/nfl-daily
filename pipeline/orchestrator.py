@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """NFL Daily Digest orchestrator.
 
-Reads ~/.nfl-digest/sources.yaml, fans out to fetchers in parallel, writes a timestamped
-run log to ~/.nfl-digest/runs/<ISO8601>.json, and prints a JSON "synthesis package" to stdout
-that the in-session Claude consumes directly to produce the four-section digest.
+Reads config/sources.yaml, fans out to fetchers in parallel, writes a timestamped run log to
+runtime/runs/<ISO8601>.json, and prints a JSON "synthesis package" to stdout that the
+synthesizing Claude consumes to produce the slim digest (see prompts/digest-v3.md). Paths are
+repo-local by default; NFL_DAILY_RUNTIME / NFL_DAILY_SOURCES / NFL_DAILY_PROMPTS override them.
 
 Usage:
-    python3 orchestrator.py            # full run; writes run log + prints synthesis package
-    python3 orchestrator.py --dry-run  # smoke test; no run log written
+    python3 orchestrator.py                    # full run; writes run log + prints package
+    python3 orchestrator.py --days N           # recency window in days back (1-7, default 1)
+    python3 orchestrator.py --include-undated  # keep items with no parseable date
+    python3 orchestrator.py --source-id ID     # fetch a single source (debug)
+    python3 orchestrator.py --dry-run          # smoke test; no run log written
+    python3 orchestrator.py --summary-only     # print counts instead of the full package
 """
 from __future__ import annotations
 
@@ -44,8 +49,7 @@ PROMPTS_DIR = Path(os.environ.get("NFL_DAILY_PROMPTS", REPO_ROOT / "prompts")).e
 SNIPPET_MAX_CHARS = 220
 TITLE_MAX_CHARS = 240
 # Podcasts publish weekly (not daily), so they get a separate, fixed 7-day window regardless
-# of the user's --days N flag. Without this, /nfl-digest 1 would virtually always have 0
-# podcasts in section F.
+# of the --days N flag. Without this, a 1-day window would virtually always have 0 podcasts.
 PODCAST_RECENCY_HOURS = 24 * 7
 
 FETCHERS = {
@@ -95,7 +99,7 @@ def main() -> int:
 
     if not SOURCES_FILE.exists():
         print(f"ERROR: sources file not found: {SOURCES_FILE}", file=sys.stderr)
-        print("Run setup.sh or copy the starter sources.yaml into ~/.nfl-digest/", file=sys.stderr)
+        print("Expected config/sources.yaml in the repo (or set NFL_DAILY_SOURCES).", file=sys.stderr)
         return 1
 
     with SOURCES_FILE.open() as f:
@@ -167,7 +171,7 @@ def main() -> int:
         "raw_items": raw_items,
         "tweet_feeds": tweet_feeds,
         "digest_outputs": None,  # synthesis Claude writes per-tab markdown here
-        "prompt_version": "digest-v2",
+        "prompt_version": "digest-v3",
         "recency_hours_cap": recency_cap_hours,
     }
 
@@ -200,9 +204,9 @@ def main() -> int:
     ]
     podcast_items = truncated_podcasts
 
-    # Prefer digest-v2 (multi-tab) when present; fall back to v1 for environments where the
-    # newer prompt hasn't been installed yet.
-    prompt_path = PROMPTS_DIR / "digest-v2.md"
+    # Pointer for reference only — the synthesizing agent reads the prompts per RUNBOOK.md
+    # (digest-v3 for structure, digest-v1 for rubrics), not this path.
+    prompt_path = PROMPTS_DIR / "digest-v3.md"
     if not prompt_path.exists():
         prompt_path = PROMPTS_DIR / "digest-v1.md"
     synthesis_package = {
