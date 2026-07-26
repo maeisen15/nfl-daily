@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 secrets.env
+
+runtime/
+web/debug-frame.html

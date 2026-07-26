@@ -25,8 +25,10 @@ except ImportError:
     yaml = None
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_RUNS_DIR = os.path.expanduser("~/.nfl-digest/runs")
-DEFAULT_SOURCES = os.path.expanduser("~/.nfl-digest/sources.yaml")
+_RUNTIME = os.path.expanduser(os.environ.get("NFL_DAILY_RUNTIME", os.path.join(REPO_ROOT, "runtime")))
+DEFAULT_RUNS_DIR = os.path.join(_RUNTIME, "runs")
+DEFAULT_SOURCES = os.path.expanduser(
+    os.environ.get("NFL_DAILY_SOURCES", os.path.join(REPO_ROOT, "config", "sources.yaml")))
 
 SCHEMA_VERSION = 1
 

@@ -1,0 +1,340 @@
+# NFL Daily Digest — source configuration (starter)
+#
+# This file lives at ~/.nfl-digest/sources.yaml at runtime.
+# Edit freely: add, remove, swap, toggle `enabled`. The orchestrator reads this on every run.
+#
+# Phase 2 wires the five news pages + The Ringer analysis.
+# Phase 3 adds structured-data (transactions/injuries). Phase 4 adds Twitter.
+
+# ---- News pages ----------------------------------------------------------------------------
+news_sources:
+  - id: espn_nfl
+    name: "ESPN NFL"
+    url: "https://www.espn.com/nfl/"
+    rss_url: "https://www.espn.com/espn/rss/nfl/news"
+    fetch: "rss"
+    enabled: true
+
+  - id: cbs_nfl
+    name: "CBS Sports NFL"
+    url: "https://www.cbssports.com/nfl/"
+    rss_url: "https://www.cbssports.com/rss/headlines/nfl/"
+    fetch: "rss"
+    enabled: true
+
+  - id: nyt_athletic_nfl
+    name: "NYT Athletic NFL"
+    url: "https://www.nytimes.com/athletic/nfl/"
+    rss_url: "https://www.nytimes.com/athletic/rss/nfl"
+    fetch: "rss"
+    enabled: true
+
+  - id: fox_nfl
+    name: "FOX Sports NFL"
+    url: "https://www.foxsports.com/nfl"
+    rss_url: "https://api.foxsports.com/v2/content/optimized-rss?partnerKey=MB0Wehpmuj2lUhuRhQaafhBjAJqaPU244mlTDK1i&size=30&tags=fs/nfl"
+    fetch: "rss"
+    enabled: true
+
+  - id: nfl_com_news
+    name: "NFL.com News"
+    url: "https://www.nfl.com/news/"
+    fetch: "html"
+    # NFL.com is a fully client-rendered React app with no embedded API. Article URLs match
+    # /news/<slug> and are present in the static HTML. Anchor text ends in "Month DD" — we
+    # parse that into published_at so strict recency filtering can work.
+    link_pattern: "^/news/[a-z0-9-]{10,}$"
+    link_base: "https://www.nfl.com"
+    title_strategy: "anchor_text"
+    date_strategy: "title_suffix_month_day"
+    max_items: 40
+    enabled: true
+
+# ---- Analysis-only sources ----------------------------------------------------------------
+analysis_sources:
+  - id: ringer_nfl
+    name: "The Ringer NFL"
+    url: "https://www.theringer.com/topic/nfl"
+    fetch: "html"
+    # Ringer has no RSS; topic page lists articles as /<yyyy>/<mm>/<dd>/<topic>/<slug> where
+    # topic contains 'nfl'. Date is in the URL — extract it.
+    link_pattern: "^/20[0-9]{2}/[0-9]{2}/[0-9]{2}/[a-z0-9-]*nfl[a-z0-9-]*/[a-z0-9-]+"
+    link_base: "https://www.theringer.com"
+    title_strategy: "anchor_text"
+    date_strategy: "url_yyyy_mm_dd"
+    max_items: 30
+    enabled: true
+
+# ---- Structured data ----------------------------------------------------------------------
+# Authoritative sources for Transactions + Injuries. ESPN's hidden API is preferred; NFL.com
+# pages are cross-source secondaries. The synthesis prompt grounds transaction/injury bullets
+# in these — fabrication of transactions/injuries is a critical bug.
+structured_data:
+  - id: espn_injuries
+    name: "ESPN Injuries (API)"
+    fetch: "espn_api"
+    type: "espn_injuries"
+    # Single league-wide endpoint discovered in Phase 0 (see api-discovery-notes.md).
+    # Returns expanded data in one call — simpler than the per-team-id loop in the original plan.
+    link_destination: "https://www.espn.com/nfl/injuries"
+    max_items: 200
+    enabled: true
+
+  - id: espn_transactions
+    name: "ESPN Transactions (API)"
+    fetch: "espn_api"
+    type: "espn_transactions"
+    # Endpoint requires /seasons/<YEAR>/ scoping. Empty for the upcoming season during deep
+    # offseason — fetcher falls back to prior season automatically.
+    link_destination: "https://www.espn.com/nfl/transactions"
+    max_items: 200
+    enabled: true
+
+  - id: nfl_com_injuries
+    name: "NFL.com Injuries (cross-source)"
+    url: "https://www.nfl.com/injuries/"
+    fetch: "html"
+    # Page renders per-game injury reports under .nfl-o-injury-report__unit. Anchors inside
+    # link to player profiles or game pages. In deep offseason the page is mostly empty —
+    # expected `warn` status until preseason. Selector regex below catches player-profile
+    # anchors when present.
+    link_pattern: "^/players/[a-z0-9-]+/"
+    link_base: "https://www.nfl.com"
+    title_strategy: "anchor_text"
+    max_items: 80
+    enabled: true
+
+  - id: nfl_com_transactions
+    name: "NFL.com Transactions (cross-source)"
+    url: "https://www.nfl.com/transactions/"
+    fetch: "html"
+    # Currently renders class="nfl-o-no-results" — empty during offseason. When populated,
+    # transaction rows include player-profile anchors; same selector strategy as injuries.
+    # Expect `warn` (0 items) until offseason traffic begins.
+    link_pattern: "^/players/[a-z0-9-]+/"
+    link_base: "https://www.nfl.com"
+    title_strategy: "anchor_text"
+    max_items: 80
+    enabled: true
+
+# ---- Podcasts -----------------------------------------------------------------------------
+# Surfaced in the digest's "F. Podcasts" section as: podcast name + episode title + date +
+# listen link. We pull podcast RSS feeds directly (most podcasts are just RSS under the hood)
+# and use the existing rss fetcher.
+podcasts:
+  - id: podcast_mina_kimes
+    name: "The Mina Kimes Show featuring Lenny"
+    rss_url: "https://feeds.megaphone.fm/ESP8957020927"
+    fetch: "rss"
+    max_items: 8
+    enabled: true
+
+  - id: podcast_football_301
+    name: "Football 301 with Nate Tice"
+    rss_url: "https://feeds.simplecast.com/Nvy5cWFT"
+    fetch: "rss"
+    max_items: 8
+    enabled: true
+
+  - id: podcast_ringer_nfl
+    name: "The Ringer NFL Show"
+    rss_url: "https://feeds.megaphone.fm/the-ringer-nfl-show"
+    fetch: "rss"
+    max_items: 8
+    enabled: true
+
+  - id: podcast_schatz_tanier
+    name: "The Schatz & Tanier NFL Podcast"
+    rss_url: "https://feeds.simplecast.com/S_L_BPM1"
+    fetch: "rss"
+    max_items: 8
+    enabled: true
+
+  - id: podcast_athletic_football
+    name: "The Athletic Football Show"
+    rss_url: "https://feeds.acast.com/public/shows/681cc905bdc60241406b737f"
+    fetch: "rss"
+    max_items: 8
+    enabled: true
+
+# ---- Twitter ------------------------------------------------------------------------------
+# Twitter sources are shipped DISABLED by default in v1. To activate:
+#   1. Start Docker Desktop (or any Docker engine on the host).
+#   2. `docker run -d -p 1200:1200 --name rsshub diygod/rsshub`
+#   3. Smoke-test once: curl http://localhost:1200/twitter/user/AdamSchefter
+#   4. Flip the handles below to enabled: true and re-run the digest.
+#
+# After ~5 days of polls, run `python3 ~/.claude/skills/nfl-digest/scripts/twitter_reliability_check.py`
+# to evaluate whether rsshub is hitting the reliability bar (≥90% successful polls, no missed
+# major scoops). If not, switch twitter_path to "twitterapi_io" and add TWITTERAPI_IO_KEY to
+# ~/.nfl-digest/secrets.env per the Implementation Plan's Twitter decision tree.
+#
+# Per-handle feed flags (tweet-feed feature, added 2026-05-25):
+#   feed:      true → tweets surface in the per-tab Tweet Feed UI (default: true)
+#   feed_only: true → tweets ONLY appear in the feed and are NOT passed to digest synthesis
+#                     (default: false → "dual-use": feed AND synthesis)
+# Missing flags preserve original behavior (feed=true, feed_only=false).
+# Routing: twitter_news_* / twitter_analysis_* → National feed.
+#          ravens_twitter_*                    → Ravens feed.
+#          rival_<code>_twitter_*              → Rivals feed (that team's subtab).
+
+twitter_news_handles:
+  - handle: "AdamSchefter"
+    name: "Adam Schefter"
+    enabled: true
+    feed: true
+  - handle: "RapSheet"
+    name: "Ian Rapoport"
+    enabled: true
+    feed: true
+  - handle: "MikeGarafolo"
+    name: "Mike Garafolo"
+    enabled: true
+    feed: true
+  - handle: "JayGlazer"
+    name: "Jay Glazer"
+    enabled: true
+    feed: true
+  - handle: "PSchrags"
+    name: "Peter Schrager"
+    enabled: true
+    feed: true
+
+twitter_analysis_handles:
+  - handle: "BenjaminSolak"
+    name: "Ben Solak"
+    enabled: true
+    feed: true
+    feed_only: true
+  - handle: "KevinCole___"
+    name: "Kevin Cole"
+    enabled: true
+    feed: true
+    feed_only: true
+  - handle: "minakimes"
+    name: "Mina Kimes"
+    enabled: true
+    feed: true
+    feed_only: true
+  - handle: "ASchatzNFL"
+    name: "Aaron Schatz"
+    enabled: true
+    feed: true
+    feed_only: true
+
+twitter_path: "twitterapi_io"      # rsshub | twitterapi_io | disabled
+twitter_endpoint: "http://localhost:1200"  # only used when twitter_path == rsshub
+
+# ---- Team coverage --------------------------------------------------------------------------
+# Drives the Ravens and Rivals tabs in the web viewer. One `primary` team (Ravens) plus a list
+# of `rivals` (Steelers at launch; add Bengals, Browns, Chiefs, Bills as needed). Source IDs:
+#   - Ravens news:      ravens_news_<slug>
+#   - Ravens twitter:   ravens_twitter_<handle>
+#   - Rival news:       rival_<team_code_lower>_news_<slug>
+#   - Rival twitter:    rival_<team_code_lower>_twitter_<handle>
+# The Ravens tab synthesizes EVERY transaction/injury (no tier filter); the Rivals tab applies
+# the same Tier 1/2 filter as the National tab. ESPN league-wide transactions+injuries data
+# is filtered by team_code at synthesis time — no per-team ESPN fetches.
+team_coverage:
+  primary:
+    team_code: BAL
+    display_name: "Baltimore Ravens"
+    news_sources:
+      - id: ravens_news_athletic
+        name: "NYT Athletic — Ravens"
+        url: "https://www.nytimes.com/athletic/nfl/team/ravens/"
+        rss_url: "https://www.nytimes.com/athletic/rss/nfl/ravens/"
+        fetch: "rss"
+        enabled: true
+
+      - id: ravens_news_russell_street
+        name: "Russell Street Report"
+        url: "https://russellstreetreport.com/"
+        rss_url: "https://russellstreetreport.com/feed/"
+        fetch: "rss"
+        enabled: true
+
+      - id: ravens_news_banner
+        name: "The Baltimore Banner — Ravens"
+        url: "https://www.thebanner.com/topic/sports/ravens-nfl/"
+        fetch: "html"
+        # Banner has no Ravens-filtered RSS feed (Arc XP category feeds return empty for
+        # /sports/ravens-nfl/); scrape the topic page and parse article:published_time from
+        # each article page.
+        link_pattern: "^/sports/ravens-nfl/[a-zA-Z0-9-]+/?$"
+        link_base: "https://www.thebanner.com"
+        title_strategy: "anchor_text"
+        date_strategy: "article_meta"
+        max_items: 25
+        enabled: true
+
+      - id: ravens_news_official
+        name: "Baltimore Ravens — Official News"
+        url: "https://www.baltimoreravens.com/news/all-news"
+        fetch: "html"
+        # DataDome blocks the /rss/ endpoint; the news index page loads fine. Articles have
+        # JSON-LD datePublished — article_meta picks it up.
+        link_pattern: "^/news/[a-z0-9-]{10,}/?$"
+        link_base: "https://www.baltimoreravens.com"
+        title_strategy: "anchor_text"
+        date_strategy: "article_meta"
+        max_items: 25
+        enabled: true
+
+      - id: ravens_news_sun
+        name: "Baltimore Sun — Ravens"
+        url: "https://www.baltimoresun.com/sports/nfl/baltimore-ravens/"
+        fetch: "html"
+        # Sun's RSS endpoint (sports/nfl/baltimore-ravens/feed/) returns 403 even with browser
+        # headers; HTML page loads fine. Article URLs are /YYYY/MM/DD/<slug>/; we require
+        # "ravens" in the slug to filter out sidebar/footer noise from non-Ravens articles.
+        link_pattern: "/(20\\d{2})/(\\d{2})/(\\d{2})/[a-z0-9-]*ravens[a-z0-9-]*/?$"
+        link_base: "https://www.baltimoresun.com"
+        title_strategy: "anchor_text"
+        date_strategy: "url_yyyy_mm_dd"
+        max_items: 25
+        enabled: true
+
+    twitter_handles:
+      - handle: "jeffzrebiec"
+        name: "Jeff Zrebiec (The Athletic)"
+        enabled: true
+        feed: true
+      - handle: "jonas_shaffer"
+        name: "Jonas Shaffer (The Banner)"
+        enabled: true
+        feed: true
+
+  rivals:
+    - team_code: PIT
+      display_name: "Pittsburgh Steelers"
+      news_sources:
+        - id: rival_pit_news_athletic
+          name: "NYT Athletic — Steelers"
+          url: "https://www.nytimes.com/athletic/nfl/team/steelers/"
+          rss_url: "https://www.nytimes.com/athletic/rss/nfl/steelers/"
+          fetch: "rss"
+          enabled: true
+
+        - id: rival_pit_news_pennlive
+          name: "PennLive — Steelers"
+          url: "https://www.pennlive.com/steelers/"
+          rss_url: "https://www.pennlive.com/arc/outboundfeeds/rss/category/steelers/?outputType=xml"
+          fetch: "rss"
+          enabled: true
+
+        - id: rival_pit_news_post_gazette
+          name: "Pittsburgh Post-Gazette — Steelers"
+          url: "https://www.post-gazette.com/sports/steelers"
+          rss_url: "https://www.post-gazette.com/rss/sports/steelers"
+          fetch: "rss"
+          enabled: true
+
+      twitter_handles:
+        - handle: "FarabaughFB"
+          name: "Nick Farabaugh (PennLive)"
+          enabled: true
+          feed: true
+
+# ---- Recency window -----------------------------------------------------------------------
+recency_hours_cap: 48              # items older than this are dropped at synthesis time
