@@ -162,7 +162,7 @@ def build_items(run, primary_code, rival_codes):
                 "author_handle": t.get("author_handle"),
                 "author_name": t.get("author_name"),
                 "team": None,
-                "media": [],
+                "media": t.get("media") or [],
             }, ("tweet", t.get("tweet_id") or t.get("url")))
 
     # Articles + structured rows

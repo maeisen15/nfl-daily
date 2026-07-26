@@ -175,6 +175,7 @@ def _normalize_rss_entry(source_id: str, handle: str, entry: Any) -> dict[str, A
         "author": handle,
         "is_retweet": _looks_like_retweet(title) or _looks_like_retweet(text_full),
         "is_reply": _looks_like_reply(title) or _looks_like_reply(text_full),
+        "media": [],  # RSSHub path doesn't expose structured media
     }
 
 
@@ -201,7 +202,20 @@ def _normalize_twitterapi_tweet(source_id: str, handle: str, tw: dict[str, Any])
         "author": handle,
         "is_retweet": is_retweet,
         "is_reply": is_reply,
+        "media": _extract_media(tw),
     }
+
+
+def _extract_media(tw: dict[str, Any]) -> list[dict[str, str]]:
+    """Photo URLs / video thumbnails from extendedEntities.media[].
+    For videos, media_url_https is the poster frame — good enough for feed cards."""
+    out: list[dict[str, str]] = []
+    ee = tw.get("extendedEntities") or tw.get("extended_entities") or {}
+    for m in ee.get("media") or []:
+        url = m.get("media_url_https") or m.get("media_url") or ""
+        if url:
+            out.append({"type": m.get("type") or "photo", "url": url})
+    return out
 
 
 def _looks_like_retweet(text: str) -> bool:

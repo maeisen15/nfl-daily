@@ -144,7 +144,8 @@ const render = {
           <span class="handle">@${esc(t.author_handle || "")}</span>
           <span class="when">${relTime(new Date(t.published_at))}</span>
         </div>
-        <div class="tweet-text">${esc(cleanTweet(t.text || ""))}</div>`;
+        <div class="tweet-text">${esc(cleanTweet(t.text || ""))}</div>
+        ${tweetMedia(t.media)}`;
       return a;
     });
   },
@@ -266,6 +267,16 @@ function mdInline(text) {
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function tweetMedia(media) {
+  if (!media || !media.length) return "";
+  const imgs = media.slice(0, 4).map(m => `
+    <div class="tweet-media-item">
+      <img src="${esc(m.url)}" alt="" loading="lazy">
+      ${m.type !== "photo" ? `<span class="media-badge">▶</span>` : ""}
+    </div>`).join("");
+  return `<div class="tweet-media ${media.length > 1 ? "grid" : ""}">${imgs}</div>`;
 }
 
 function cleanTweet(text) {
