@@ -11,6 +11,14 @@ Work from the repo root. All steps below assume it as cwd.
 pip install -r pipeline/requirements.txt
 ```
 
+If feedparser fails on its `sgmllib3k` sub-dependency (legacy sdist, known issue in the cloud
+sandbox), fall back in order until one works:
+
+```bash
+pip install setuptools wheel && pip install -r pipeline/requirements.txt
+pip install --no-build-isolation sgmllib3k && pip install -r pipeline/requirements.txt
+```
+
 ## 2. Fetch
 
 ```bash
