@@ -1,0 +1,45 @@
+# NFL Daily — cloud environment network allowlist
+#
+# Paste ALL lines below into the routine's environment settings:
+#   claude.ai/code → routine trig_01Cm97AHpb2GnbD5FAHiZ2Rg → environment settings (cloud icon)
+#   → Network access → Custom → keep "Also include default list" checked → paste → save
+#
+# Both apex (example.com) and wildcard (*.example.com) forms are required: sources serve from
+# www. and hidden-API subdomains, and the sandbox does NOT treat the apex as covering www.
+#
+# When you add a new source to config/sources.yaml, add its domain here (both forms) too, or
+# the cloud run will get a 403 at the proxy and that source will show "error" in source health.
+# Regenerate this list anytime with the domain-extraction snippet in docs/PLAN.md notes.
+
+acast.com
+*.acast.com
+baltimoreravens.com
+*.baltimoreravens.com
+baltimoresun.com
+*.baltimoresun.com
+cbssports.com
+*.cbssports.com
+espn.com
+*.espn.com
+foxsports.com
+*.foxsports.com
+megaphone.fm
+*.megaphone.fm
+nfl.com
+*.nfl.com
+nytimes.com
+*.nytimes.com
+pennlive.com
+*.pennlive.com
+post-gazette.com
+*.post-gazette.com
+russellstreetreport.com
+*.russellstreetreport.com
+simplecast.com
+*.simplecast.com
+thebanner.com
+*.thebanner.com
+theringer.com
+*.theringer.com
+twitterapi.io
+*.twitterapi.io
