@@ -304,6 +304,26 @@ team_coverage:
         name: "Jonas Shaffer (The Banner)"
         enabled: true
         feed: true
+      - handle: "Ravens"
+        name: "Baltimore Ravens (Official)"
+        enabled: true
+        feed: true
+      - handle: "ColeJacksonFB"
+        name: "Cole Jackson"
+        enabled: true
+        feed: true
+      - handle: "devpanchwagh"
+        name: "Dev Panchwagh"
+        enabled: true
+        feed: true
+      - handle: "RavensSalaryCap"
+        name: "Brian McFarland (RavensSalaryCap)"
+        enabled: true
+        feed: true
+      - handle: "FilmstudyRavens"
+        name: "Ken McKusick (Filmstudy)"
+        enabled: true
+        feed: true
 
   rivals:
     - team_code: PIT
