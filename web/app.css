@@ -2,6 +2,13 @@
    Signature: --accent re-themes per scope (BAL violet / NFL steel / PIT gold). */
 
 :root {
+  --display: "Barlow Condensed", "Avenir Next Condensed", sans-serif;
+  --body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+
+  /* dark: press box at night (default) */
+  color-scheme: dark;
   --bg: #0E0D13;
   --surface: #17161F;
   --surface-2: #1E1C28;
@@ -11,13 +18,41 @@
   --faint: #6E6980;
   --accent: #8B72F0;          /* default: Ravens violet */
   --accent-ink: #0E0D13;
-  --display: "Barlow Condensed", "Avenir Next Condensed", sans-serif;
-  --body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --sat: env(safe-area-inset-top, 0px);
-  --sab: env(safe-area-inset-bottom, 0px);
 }
-[data-scope="national"] { --accent: #6FA1F2; }
-[data-scope="PIT"]      { --accent: #F2C230; }
+:root[data-scope="national"] { --accent: #6FA1F2; }
+:root[data-scope="PIT"]      { --accent: #F2C230; }
+
+/* light: press box at noon */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #F5F4F8;
+    --surface: #FFFFFF;
+    --surface-2: #EFEDF4;
+    --line: #E2DFEA;
+    --text: #1B1826;
+    --muted: #5F5A70;
+    --faint: #8B8699;
+    --accent: #5335D6;
+    --accent-ink: #FFFFFF;
+  }
+  :root:not([data-theme="dark"])[data-scope="national"] { --accent: #1D5FC4; }
+  :root:not([data-theme="dark"])[data-scope="PIT"]      { --accent: #8A6A0D; }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #F5F4F8;
+  --surface: #FFFFFF;
+  --surface-2: #EFEDF4;
+  --line: #E2DFEA;
+  --text: #1B1826;
+  --muted: #5F5A70;
+  --faint: #8B8699;
+  --accent: #5335D6;
+  --accent-ink: #FFFFFF;
+}
+:root[data-theme="light"][data-scope="national"] { --accent: #1D5FC4; }
+:root[data-theme="light"][data-scope="PIT"]      { --accent: #8A6A0D; }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html { background: var(--bg); }
@@ -45,7 +80,14 @@ body {
   text-transform: uppercase; line-height: 1;
 }
 .wordmark span { color: var(--accent); transition: color .25s; }
+.masthead-side { display: flex; align-items: center; gap: 10px; }
 .updated { font-size: 12px; color: var(--faint); }
+.theme-btn {
+  background: none; border: none; cursor: pointer;
+  color: var(--faint); padding: 4px;
+  display: flex; align-items: center;
+}
+.theme-btn svg { width: 18px; height: 18px; fill: currentColor; }
 
 .scopes { display: flex; gap: 6px; padding: 10px 0; }
 .scope {

@@ -8,6 +8,42 @@ const state = {
 
 const $ = (sel) => document.querySelector(sel);
 
+/* ---------- theme (system default, manual override persisted) ---------- */
+
+const SUN = "M12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0-5.5 1.2 3.1-1.2.5-1.2-.5L12 1.5zm0 21-1.2-3.1 1.2-.5 1.2.5L12 22.5zM1.5 12l3.1-1.2.5 1.2-.5 1.2L1.5 12zm21 0-3.1 1.2-.5-1.2.5-1.2 3.1 1.2zM4.6 4.6l3 1.3-.8 1-2.2-2.3zm14.8 14.8-3-1.3.8-1 2.2 2.3zM19.4 4.6l-1.3 3-1-.8 2.3-2.2zM4.6 19.4l1.3-3 1 .8-2.3 2.2z";
+const MOON = "M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5 8.5 8.5 0 1 0 20.5 14.5z";
+
+function applyTheme(choice) {
+  if (choice === "light" || choice === "dark") {
+    document.documentElement.dataset.theme = choice;
+  } else {
+    delete document.documentElement.dataset.theme;
+  }
+  const dark = document.documentElement.dataset.theme === "dark" ||
+    (!document.documentElement.dataset.theme &&
+     window.matchMedia("(prefers-color-scheme: dark)").matches);
+  const icon = $("#themeIcon");
+  if (icon) icon.setAttribute("d", dark ? SUN : MOON);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = dark ? "#0E0D13" : "#F5F4F8";
+}
+
+function initTheme() {
+  const params = new URLSearchParams(location.search);
+  applyTheme(params.get("theme") || localStorage.getItem("theme") || "auto");
+  $("#themeBtn").onclick = () => {
+    const dark = document.documentElement.dataset.theme === "dark" ||
+      (!document.documentElement.dataset.theme &&
+       window.matchMedia("(prefers-color-scheme: dark)").matches);
+    const next = dark ? "light" : "dark";
+    localStorage.setItem("theme", next);
+    applyTheme(next);
+  };
+  window.matchMedia("(prefers-color-scheme: dark)")
+    .addEventListener("change", () => applyTheme(localStorage.getItem("theme") || "auto"));
+}
+
+initTheme();
 init();
 
 async function init() {
@@ -108,7 +144,7 @@ const render = {
           <span class="handle">@${esc(t.author_handle || "")}</span>
           <span class="when">${relTime(new Date(t.published_at))}</span>
         </div>
-        <div class="tweet-text">${esc(t.text || "")}</div>`;
+        <div class="tweet-text">${esc(cleanTweet(t.text || ""))}</div>`;
       return a;
     });
   },
@@ -230,6 +266,11 @@ function mdInline(text) {
 function esc(s) {
   return String(s).replace(/[&<>"']/g, c =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function cleanTweet(text) {
+  // t.co stubs stand in for attached media/quotes we don't render yet
+  return text.replace(/\s*https:\/\/t\.co\/\S+/g, "").trim();
 }
 
 function relTime(dt) {
