@@ -3,7 +3,7 @@
 
 Reads config/sources.yaml, fans out to fetchers in parallel, writes a timestamped run log to
 runtime/runs/<ISO8601>.json, and prints a JSON "synthesis package" to stdout that the
-synthesizing Claude consumes to produce the slim digest (see prompts/digest-v3.md). Paths are
+synthesizing Claude consumes to produce the slim digest (see prompts/digest.md). Paths are
 repo-local by default; NFL_DAILY_RUNTIME / NFL_DAILY_SOURCES / NFL_DAILY_PROMPTS override them.
 
 Usage:
@@ -171,7 +171,7 @@ def main() -> int:
         "raw_items": raw_items,
         "tweet_feeds": tweet_feeds,
         "digest_outputs": None,  # synthesis Claude writes per-tab markdown here
-        "prompt_version": "digest-v3",
+        "prompt_version": "digest",
         "recency_hours_cap": recency_cap_hours,
     }
 
@@ -204,11 +204,8 @@ def main() -> int:
     ]
     podcast_items = truncated_podcasts
 
-    # Pointer for reference only — the synthesizing agent reads the prompts per RUNBOOK.md
-    # (digest-v3 for structure, digest-v1 for rubrics), not this path.
-    prompt_path = PROMPTS_DIR / "digest-v3.md"
-    if not prompt_path.exists():
-        prompt_path = PROMPTS_DIR / "digest-v1.md"
+    # Pointer for reference only — the synthesizing agent reads the prompt per RUNBOOK.md.
+    prompt_path = PROMPTS_DIR / "digest.md"
     synthesis_package = {
         "run_id": run_id,
         "generated_at": completed_at.isoformat(),

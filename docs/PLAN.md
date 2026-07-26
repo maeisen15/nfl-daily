@@ -39,7 +39,7 @@ Personal NFL app for Matt. Replaces (deprecates) the local `nfl-digest` HTML sit
 1. **Data layer** — publish.py transforms a run log → app JSON. ✅ built against real run logs.
 2. **App** — three-tab PWA in `web/`, built on real data. Local preview → deploy.
 3. **Cloud migration** — pipeline code moves into this repo; scheduled agent runs noon/5pm ET; secrets (twitterapi.io) in cloud env.
-4. **Tune** — slim-digest prompt (new, replaces digest-v2 verbosity), tweet media capture in fetcher, cost check-in, then deprecate old skill.
+4. **Tune** — slim-digest prompt (`prompts/digest.md`), tweet media capture in fetcher, cost check-in, then deprecate old skill.
 
 ## Known gaps / future
 

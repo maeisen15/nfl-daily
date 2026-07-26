@@ -37,10 +37,9 @@ publish — the app would go blank. Stop and leave the repo untouched.
 ## 3. Synthesize the digest
 
 Read `runtime/package.json` (keys: `team_coverage`, `structured_data`, `raw_items`,
-`source_health`, `run_log_path`, `prompt_path`). Then read BOTH prompt files:
-`prompts/digest-v3.md` (slim brief: Summary + Transactions + Injuries per tab — this is the
-output spec) and `prompts/digest-v1.md` (ranking rubrics and hard rules that v3 references).
-Write the multi-tab slim digest exactly per those prompts.
+`source_health`, `run_log_path`, `prompt_path`). Then read `prompts/digest.md` — the single,
+self-contained synthesis prompt (output structure + rubrics + hard rules). Write the multi-tab
+slim digest exactly per that prompt.
 
 Non-negotiables:
 - Zero fabricated facts; transactions/injuries grounded ONLY in `structured_data`
@@ -56,7 +55,7 @@ Write the result back into the run log at `run_log_path` (open the JSON, set the
     "ravens":   {"full_markdown": "..."},
     "rivals":   {"PIT": {"full_markdown": "..."}}
   },
-  "prompt_version": "digest-v3"
+  "prompt_version": "digest"
 }
 ```
 

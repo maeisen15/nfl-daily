@@ -15,7 +15,7 @@ Pushing to `main` auto-deploys the app via GitHub Pages. No local machine requir
 - `pipeline/fetchers/` — per-type fetchers (rss, html, espn_api, twitter, generic api)
 - `pipeline/publish.py` — transforms the newest run log into `web/data/*.json`
 - `pipeline/RUNBOOK.md` — the step-by-step the scheduled agent follows each run
-- `prompts/` — `digest-v3.md` (active: slim brief structure) + `digest-v1.md` (ranking rubrics it references)
+- `prompts/digest.md` — the single self-contained synthesis prompt (structure + rubrics + rules)
 - `config/sources.yaml` — sources, teams (primary + rivals), and Twitter handles/flags
 - `web/` — the PWA (index.html / app.js / app.css / sw.js) and its generated `data/`
 - `docs/network-allowlist.txt` — domains the cloud environment must allow (keep in sync with sources)
