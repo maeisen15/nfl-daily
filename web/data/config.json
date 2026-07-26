@@ -1,0 +1,1 @@
+{"schema_version":1,"app_name":"NFL Daily","default_scope":"BAL","scopes":[{"code":"BAL","label":"Baltimore Ravens","short":"Ravens","role":"primary"},{"code":"national","label":"NFL","short":"NFL","role":"national"},{"code":"PIT","label":"Pittsburgh Steelers","short":"Steelers","role":"rival"}]}
