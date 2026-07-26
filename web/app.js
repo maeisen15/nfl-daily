@@ -146,6 +146,12 @@ const render = {
         </div>
         <div class="tweet-text">${esc(cleanTweet(t.text || ""))}</div>
         ${tweetMedia(t.media)}`;
+      // The card is a link to X; keep taps on the inline video from navigating away.
+      if (a.querySelector("video")) {
+        a.addEventListener("click", (e) => {
+          if (e.target.closest("video")) e.preventDefault();
+        });
+      }
       return a;
     });
   },
@@ -271,12 +277,22 @@ function esc(s) {
 
 function tweetMedia(media) {
   if (!media || !media.length) return "";
-  const imgs = media.slice(0, 4).map(m => `
-    <div class="tweet-media-item">
+  const items = media.slice(0, 4).map(m => {
+    if (m.video_url) {
+      // Native Twitter video/GIF — plays inline in iOS WebKit. GIFs autoplay muted+loop;
+      // regular video is tap-to-play with controls to respect cellular data.
+      const gif = !!m.loop;
+      return `<div class="tweet-media-item">
+        <video src="${esc(m.video_url)}" ${m.url ? `poster="${esc(m.url)}"` : ""}
+          playsinline preload="none" ${gif ? "autoplay muted loop" : "controls"}></video>
+        ${gif ? `<span class="media-badge">GIF</span>` : ""}
+      </div>`;
+    }
+    return `<div class="tweet-media-item">
       <img src="${esc(m.url)}" alt="" loading="lazy">
-      ${m.type !== "photo" ? `<span class="media-badge">▶</span>` : ""}
-    </div>`).join("");
-  return `<div class="tweet-media ${media.length > 1 ? "grid" : ""}">${imgs}</div>`;
+    </div>`;
+  }).join("");
+  return `<div class="tweet-media ${media.length > 1 ? "grid" : ""}">${items}</div>`;
 }
 
 function cleanTweet(text) {

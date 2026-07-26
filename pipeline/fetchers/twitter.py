@@ -206,16 +206,48 @@ def _normalize_twitterapi_tweet(source_id: str, handle: str, tw: dict[str, Any])
     }
 
 
-def _extract_media(tw: dict[str, Any]) -> list[dict[str, str]]:
-    """Photo URLs / video thumbnails from extendedEntities.media[].
-    For videos, media_url_https is the poster frame — good enough for feed cards."""
-    out: list[dict[str, str]] = []
+def _extract_media(tw: dict[str, Any]) -> list[dict[str, Any]]:
+    """Media from extendedEntities.media[].
+    - photo: {type:'photo', url:<image>}
+    - video / animated_gif: {type, url:<poster>, video_url:<mp4>, loop:<bool>}
+      video_url is a directly playable mp4 on video.twimg.com (iOS WebKit plays it inline).
+    """
+    out: list[dict[str, Any]] = []
     ee = tw.get("extendedEntities") or tw.get("extended_entities") or {}
     for m in ee.get("media") or []:
-        url = m.get("media_url_https") or m.get("media_url") or ""
-        if url:
-            out.append({"type": m.get("type") or "photo", "url": url})
+        mtype = m.get("type") or "photo"
+        poster = m.get("media_url_https") or m.get("media_url") or ""
+        item: dict[str, Any] = {"type": mtype, "url": poster}
+        if mtype in ("video", "animated_gif"):
+            vurl = _pick_mp4_variant(m)
+            if not vurl:
+                continue  # video with no usable mp4 — skip rather than show a dead poster
+            item["video_url"] = vurl
+            item["loop"] = mtype == "animated_gif"
+        elif not poster:
+            continue
+        out.append(item)
     return out
+
+
+def _pick_mp4_variant(media: dict[str, Any]) -> str:
+    """Choose the best mp4 variant <=720p (good quality without wasting cellular data),
+    falling back to the highest-bitrate mp4 available."""
+    vi = media.get("video_info") or media.get("videoInfo") or {}
+    variants = [
+        v for v in (vi.get("variants") or [])
+        if (v.get("content_type") or v.get("contentType")) == "video/mp4" and v.get("url")
+    ]
+    if not variants:
+        return ""
+    def bitrate(v: dict[str, Any]) -> int:
+        try:
+            return int(v.get("bitrate") or 0)
+        except (TypeError, ValueError):
+            return 0
+    capped = [v for v in variants if "/1280x720/" in v["url"] or bitrate(v) <= 2176000]
+    pool = capped or variants
+    return max(pool, key=bitrate)["url"]
 
 
 def _looks_like_retweet(text: str) -> bool:
