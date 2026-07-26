@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>NFL Daily</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="NFL Daily">
+<meta name="theme-color" content="#0E0D13">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="masthead">
+  <div class="masthead-row">
+    <h1 class="wordmark">NFL <span>Daily</span></h1>
+    <span class="updated" id="updated">—</span>
+  </div>
+  <nav class="scopes" id="scopes" aria-label="Team scope"></nav>
+</header>
+
+<main id="main">
+  <section id="view-home" class="view" aria-label="Digest"></section>
+  <section id="view-tweets" class="view" hidden aria-label="Tweets"></section>
+  <section id="view-articles" class="view" hidden aria-label="Articles"></section>
+</main>
+
+<nav class="tabbar" aria-label="Sections">
+  <button class="tab is-active" data-tab="home">
+    <svg viewBox="0 0 24 24"><path d="M4 5h16v3H4zM4 10.5h16v2H4zM4 14.5h10v2H4zM4 18.5h13v2H4z"/></svg>
+    <span>Home</span>
+  </button>
+  <button class="tab" data-tab="tweets">
+    <svg viewBox="0 0 24 24"><path d="M4 4h16v12H9l-5 4V4z"/></svg>
+    <span>Tweets</span>
+  </button>
+  <button class="tab" data-tab="articles">
+    <svg viewBox="0 0 24 24"><path d="M5 3h11l3 3v15H5V3zm3 5h8v1.5H8V8zm0 3.5h8V13H8v-1.5zm0 3.5h5v1.5H8V15z"/></svg>
+    <span>Articles</span>
+  </button>
+</nav>
+
+<script src="app.js"></script>
+</body>
+</html>

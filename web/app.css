@@ -1,0 +1,185 @@
+/* NFL Daily — press box at night.
+   Signature: --accent re-themes per scope (BAL violet / NFL steel / PIT gold). */
+
+:root {
+  --bg: #0E0D13;
+  --surface: #17161F;
+  --surface-2: #1E1C28;
+  --line: #2B2937;
+  --text: #EDEBF3;
+  --muted: #9C97AC;
+  --faint: #6E6980;
+  --accent: #8B72F0;          /* default: Ravens violet */
+  --accent-ink: #0E0D13;
+  --display: "Barlow Condensed", "Avenir Next Condensed", sans-serif;
+  --body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+}
+[data-scope="national"] { --accent: #6FA1F2; }
+[data-scope="PIT"]      { --accent: #F2C230; }
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { background: var(--bg); }
+body {
+  font-family: var(--body);
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+/* ---------- masthead ---------- */
+.masthead {
+  position: sticky; top: 0; z-index: 20;
+  padding: calc(var(--sat) + 10px) 16px 0;
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--line);
+}
+.masthead-row { display: flex; align-items: baseline; justify-content: space-between; }
+.wordmark {
+  font-family: var(--display);
+  font-weight: 700; font-size: 26px; letter-spacing: .04em;
+  text-transform: uppercase; line-height: 1;
+}
+.wordmark span { color: var(--accent); transition: color .25s; }
+.updated { font-size: 12px; color: var(--faint); }
+
+.scopes { display: flex; gap: 6px; padding: 10px 0; }
+.scope {
+  font-family: var(--display);
+  font-size: 16px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: color .2s, background .2s, border-color .2s;
+}
+.scope.is-active {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ---------- layout ---------- */
+main {
+  max-width: 640px; margin: 0 auto;
+  padding: 14px 16px calc(var(--sab) + 76px);
+}
+.view > * + * { margin-top: 10px; }
+
+.day-label {
+  font-family: var(--display);
+  font-size: 15px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--faint);
+  padding: 14px 2px 2px;
+}
+
+/* ---------- cards ---------- */
+.card {
+  display: block;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  text-decoration: none; color: inherit;
+}
+a.card:active { background: var(--surface-2); }
+
+.card-meta {
+  display: flex; align-items: baseline; gap: 8px;
+  font-size: 12.5px; color: var(--muted);
+  margin-bottom: 6px;
+}
+.card-meta .src {
+  font-family: var(--display);
+  font-size: 14px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--accent);
+}
+.card-meta .when { margin-left: auto; color: var(--faint); white-space: nowrap; }
+
+.tweet-text { font-size: 15px; line-height: 1.45; white-space: pre-wrap; word-wrap: break-word; }
+.handle { color: var(--faint); font-weight: 400; }
+
+.article-title { font-size: 16px; font-weight: 600; line-height: 1.3; }
+.article-snippet {
+  font-size: 13.5px; color: var(--muted); line-height: 1.45; margin-top: 5px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+/* ---------- home / digest ---------- */
+.digest-section {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+.digest-section > h2 {
+  font-family: var(--display);
+  font-size: 17px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--accent);
+  padding-bottom: 8px; margin-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.digest-section ul { list-style: none; }
+.digest-section li {
+  font-size: 14.5px; line-height: 1.5;
+  padding: 7px 0 7px 14px;
+  position: relative;
+}
+.digest-section li::before {
+  content: ""; position: absolute; left: 0; top: 15px;
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--accent);
+}
+.digest-section li + li { border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent); }
+.digest-section p { font-size: 14.5px; line-height: 1.5; padding: 4px 0; }
+.digest-section a { color: var(--accent); text-decoration: none; }
+.digest-section em { color: var(--muted); }
+
+details.source-health { padding: 4px 2px; }
+details.source-health summary {
+  font-size: 12.5px; color: var(--faint); cursor: pointer; list-style: none;
+}
+details.source-health summary::before { content: "▸ "; }
+details.source-health[open] summary::before { content: "▾ "; }
+details.source-health .digest-section { margin-top: 8px; }
+details.source-health li::before { background: var(--faint); }
+
+.empty {
+  text-align: center; color: var(--faint); font-size: 14px;
+  padding: 48px 20px; line-height: 1.5;
+}
+
+/* ---------- tab bar ---------- */
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+  display: flex; justify-content: space-around;
+  padding: 8px 8px calc(var(--sab) + 8px);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+  border-top: 1px solid var(--line);
+}
+.tab {
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  background: none; border: none; cursor: pointer;
+  color: var(--faint);
+  font-family: var(--display);
+  font-size: 13px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+  padding: 2px 18px;
+  transition: color .15s;
+}
+.tab svg { width: 22px; height: 22px; fill: currentColor; }
+.tab.is-active { color: var(--accent); }
+
+.scope:focus-visible, .tab:focus-visible, a.card:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}

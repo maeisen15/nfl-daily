@@ -1,0 +1,253 @@
+/* NFL Daily — app logic. Static PWA reading ./data/*.json */
+
+const state = {
+  config: null, feed: null, digest: null,
+  scope: null,
+  tab: "home",
+};
+
+const $ = (sel) => document.querySelector(sel);
+
+init();
+
+async function init() {
+  try {
+    const bust = `?v=${Date.now()}`;
+    const [config, feed, digest] = await Promise.all([
+      fetch(`data/config.json${bust}`).then(r => r.json()),
+      fetch(`data/feed.json${bust}`).then(r => r.json()),
+      fetch(`data/digest.json${bust}`).then(r => r.json()),
+    ]);
+    state.config = config;
+    state.feed = feed;
+    state.digest = digest;
+  } catch (err) {
+    $("#main").innerHTML = `<div class="empty">Couldn't load the feed. Check your connection and pull to refresh.</div>`;
+    return;
+  }
+  const params = new URLSearchParams(location.search);
+  const saved = params.get("scope") || localStorage.getItem("scope");
+  const codes = state.config.scopes.map(s => s.code);
+  state.scope = codes.includes(saved) ? saved : state.config.default_scope;
+  if (["home", "tweets", "articles"].includes(params.get("tab"))) {
+    state.tab = params.get("tab");
+    document.querySelectorAll(".tab").forEach(b =>
+      b.classList.toggle("is-active", b.dataset.tab === state.tab));
+  }
+
+  renderScopes();
+  renderUpdated();
+  bindTabs();
+  renderView();
+
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+
+/* ---------- chrome ---------- */
+
+function renderScopes() {
+  const nav = $("#scopes");
+  nav.innerHTML = "";
+  for (const s of state.config.scopes) {
+    const btn = document.createElement("button");
+    btn.className = "scope" + (s.code === state.scope ? " is-active" : "");
+    btn.textContent = s.short || s.label;
+    btn.onclick = () => {
+      state.scope = s.code;
+      localStorage.setItem("scope", s.code);
+      renderScopes();
+      renderView();
+    };
+    nav.appendChild(btn);
+  }
+  document.documentElement.dataset.scope = state.scope;
+}
+
+function renderUpdated() {
+  const dt = new Date(state.feed.generated_at);
+  $("#updated").textContent = isNaN(dt) ? "" : `Updated ${relTime(dt)}`;
+}
+
+function bindTabs() {
+  document.querySelectorAll(".tab").forEach(btn => {
+    btn.onclick = () => {
+      state.tab = btn.dataset.tab;
+      document.querySelectorAll(".tab").forEach(b => b.classList.toggle("is-active", b === btn));
+      renderView();
+      window.scrollTo(0, 0);
+    };
+  });
+}
+
+function renderView() {
+  document.documentElement.dataset.scope = state.scope;
+  for (const name of ["home", "tweets", "articles"]) {
+    const el = $(`#view-${name}`);
+    el.hidden = name !== state.tab;
+    if (name === state.tab) el.replaceChildren(...render[name]());
+  }
+}
+
+/* ---------- renderers ---------- */
+
+const render = {
+  home() {
+    const tab = state.digest.tabs.find(t => t.scope === state.scope);
+    if (!tab) return [empty("No digest for this view yet. It'll appear after the next run.")];
+    return digestSections(tab.markdown);
+  },
+
+  tweets() {
+    const items = scoped("tweet");
+    if (!items.length) return [empty("No tweets in this window.")];
+    return withDayLabels(items, t => {
+      const a = card(t.url);
+      a.innerHTML = `
+        <div class="card-meta">
+          <span class="src">${esc(t.author_name || t.source_name || "")}</span>
+          <span class="handle">@${esc(t.author_handle || "")}</span>
+          <span class="when">${relTime(new Date(t.published_at))}</span>
+        </div>
+        <div class="tweet-text">${esc(t.text || "")}</div>`;
+      return a;
+    });
+  },
+
+  articles() {
+    const items = scoped("article");
+    if (!items.length) return [empty("No articles in this window.")];
+    return withDayLabels(items, r => {
+      const a = card(r.url);
+      a.innerHTML = `
+        <div class="card-meta">
+          <span class="src">${esc(r.source_name || "")}</span>
+          <span class="when">${relTime(new Date(r.published_at))}</span>
+        </div>
+        <div class="article-title">${esc(r.title || "")}</div>
+        ${r.text ? `<div class="article-snippet">${esc(r.text)}</div>` : ""}`;
+      return a;
+    });
+  },
+};
+
+function scoped(type) {
+  return state.feed.items.filter(i => i.type === type && i.scopes.includes(state.scope));
+}
+
+function card(url) {
+  const a = document.createElement("a");
+  a.className = "card";
+  a.href = url;
+  a.target = "_blank";
+  a.rel = "noopener";
+  return a;
+}
+
+function empty(msg) {
+  const d = document.createElement("div");
+  d.className = "empty";
+  d.textContent = msg;
+  return d;
+}
+
+function withDayLabels(items, toCard) {
+  const out = [];
+  let lastDay = null;
+  for (const it of items) {
+    const day = dayLabel(new Date(it.published_at));
+    if (day !== lastDay) {
+      lastDay = day;
+      const lbl = document.createElement("div");
+      lbl.className = "day-label";
+      lbl.textContent = day;
+      out.push(lbl);
+    }
+    out.push(toCard(it));
+  }
+  return out;
+}
+
+/* ---------- digest markdown (headers, bullets, links, bold/italic) ---------- */
+
+function digestSections(md) {
+  const sections = [];
+  let current = null;
+  for (const raw of md.split("\n")) {
+    const line = raw.trimEnd();
+    if (line.startsWith("# ")) continue; // page title — masthead covers it
+    const h = line.match(/^##\s+(.*)/);
+    if (h) {
+      current = { title: h[1].trim(), lines: [] };
+      sections.push(current);
+      continue;
+    }
+    if (current) current.lines.push(line);
+  }
+  const out = [];
+  for (const s of sections) {
+    const sec = document.createElement("div");
+    sec.className = "digest-section";
+    sec.innerHTML = `<h2>${esc(s.title)}</h2>${mdBlock(s.lines)}`;
+    if (/source health/i.test(s.title)) {
+      const det = document.createElement("details");
+      det.className = "source-health";
+      det.innerHTML = `<summary>Source health</summary>`;
+      det.appendChild(sec);
+      out.push(det);
+    } else {
+      out.push(sec);
+    }
+  }
+  return out.length ? out : [empty("Digest is empty for this window.")];
+}
+
+function mdBlock(lines) {
+  let html = "", inList = false;
+  for (const line of lines) {
+    const li = line.match(/^\s*[-*]\s+(.*)/);
+    if (li) {
+      if (!inList) { html += "<ul>"; inList = true; }
+      html += `<li>${mdInline(li[1])}</li>`;
+    } else {
+      if (inList) { html += "</ul>"; inList = false; }
+      if (line.trim() && line.trim() !== "---") html += `<p>${mdInline(line.trim())}</p>`;
+    }
+  }
+  if (inList) html += "</ul>";
+  return html;
+}
+
+function mdInline(text) {
+  let s = esc(text);
+  s = s.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, `<a href="$2" target="_blank" rel="noopener">$1</a>`);
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/(^|\s)_([^_]+)_/g, "$1<em>$2</em>");
+  return s;
+}
+
+/* ---------- utils ---------- */
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function relTime(dt) {
+  if (isNaN(dt)) return "";
+  const mins = Math.round((Date.now() - dt.getTime()) / 60000);
+  if (mins < 1) return "now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  return days === 1 ? "yesterday" : `${days}d ago`;
+}
+
+function dayLabel(dt) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const that = new Date(dt); that.setHours(0, 0, 0, 0);
+  const diff = Math.round((today - that) / 86400000);
+  if (diff <= 0) return "Today";
+  if (diff === 1) return "Yesterday";
+  return dt.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+}
