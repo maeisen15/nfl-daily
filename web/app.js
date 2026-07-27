@@ -180,7 +180,9 @@ function scoped(type) {
 function card(url) {
   const a = document.createElement("a");
   a.className = "card";
-  a.href = url;
+  // Only http(s) hrefs — neutralize a javascript:/data: URL from a hijacked feed (an anchor
+  // executes javascript: hrefs on tap regardless of target="_blank").
+  a.href = /^https?:\/\//i.test(url || "") ? url : "#";
   a.target = "_blank";
   a.rel = "noopener";
   return a;

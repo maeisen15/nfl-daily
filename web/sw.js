@@ -1,5 +1,5 @@
 /* NFL Daily service worker — cache shell, network-first for data. */
-const SHELL = "nfl-daily-shell-v4";
+const SHELL = "nfl-daily-shell-v5";
 const SHELL_FILES = ["index.html", "app.css", "app.js", "manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {
