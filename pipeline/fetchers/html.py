@@ -92,6 +92,19 @@ def fetch(source: dict[str, Any]) -> dict[str, Any]:
         if source.get("date_strategy") == "article_meta" and items:
             _enrich_dates_from_article_meta(items)
 
+        # `assume_current`: for status pages that carry no per-item date (NFL.com
+        # injuries/transactions), treat undated items as current so the strict recency filter
+        # doesn't silently drop every one of them. These pages only ever show current-week
+        # state, so "now" is accurate. NOTE: their titles are bare player names with no team,
+        # so downstream team-tagging can't route them to a team tab (national only). Verify in
+        # preseason once the pages actually populate.
+        if source.get("assume_current"):
+            from datetime import datetime, timezone
+            now_iso = datetime.now(timezone.utc).isoformat()
+            for it in items:
+                if not it.get("published_at"):
+                    it["published_at"] = now_iso
+
         if not items:
             status = "warn"
             note = "page fetched but no items matched selector"

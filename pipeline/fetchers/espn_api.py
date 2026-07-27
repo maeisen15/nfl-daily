@@ -123,6 +123,7 @@ def _normalize_injury(
         "published_at": _coerce_iso(inj.get("date")),
         "snippet": short or long_comment[:240],
         "author": None,
+        "team": team_name or None,  # authoritative team, for accurate tab routing
     }
 
 
@@ -180,6 +181,7 @@ def _normalize_transaction(source_id: str, raw: dict[str, Any], link_dest: str) 
         "published_at": date_iso,
         "snippet": None,
         "author": None,
+        "team": team_name or None,  # authoritative transacting team, for accurate tab routing
     }
 
 

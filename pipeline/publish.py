@@ -87,9 +87,37 @@ def find_team(text):
     return None, None
 
 
+def resolve_team(item):
+    """Team code for a structured item. Prefer the fetcher's authoritative `team` field
+    (ESPN sets the transacting/injured team explicitly); fall back to scanning the title
+    only when it's absent (e.g. NFL.com pages). Avoids mis-tagging a transaction that
+    mentions a second team (e.g. 'Steelers claim WR from Cardinals' → PIT, not ARI)."""
+    code = TEAM_CODES.get(item.get("team") or "")
+    if code:
+        return code
+    return find_team(item.get("title"))[0]
+
+
 def item_id(*parts):
     h = hashlib.sha1("|".join(str(p) for p in parts).encode("utf-8")).hexdigest()
     return h[:16]
+
+
+# Refuse to publish if more than this fraction of sources errored (suspected mass failure).
+MAX_SOURCE_ERROR_RATE = 0.5
+
+
+def publish_ok(items, health_list):
+    """(ok, reason) — is this run healthy enough to overwrite the live data?"""
+    if not items:
+        return False, "0 items in window (empty or failed run)"
+    statuses = [str(h.get("status", "")) for h in (health_list or [])]
+    if statuses:
+        errors = sum(1 for s in statuses if s == "error")
+        rate = errors / len(statuses)
+        if rate > MAX_SOURCE_ERROR_RATE:
+            return False, f"{errors}/{len(statuses)} sources errored ({rate:.0%}) — suspected mass fetch failure"
+    return True, ""
 
 
 def load_sources_config(path):
@@ -187,7 +215,7 @@ def build_items(run, primary_code, rival_codes):
         if dt < (cutoff if rtype else article_cutoff):
             continue
         if rtype:  # transaction / injury
-            team_code, _ = find_team(r.get("title"))
+            team_code = resolve_team(r)
             scopes = ["national"]
             if team_code in tracked:
                 scopes.append(team_code)
@@ -250,6 +278,8 @@ def main():
     ap.add_argument("--run", help="path to a run log JSON (default: newest)")
     ap.add_argument("--sources", default=DEFAULT_SOURCES)
     ap.add_argument("--out", default=os.path.join(REPO_ROOT, "web", "data"))
+    ap.add_argument("--force", action="store_true",
+                    help="publish even if the safety guard would block (empty/degraded run)")
     args = ap.parse_args()
 
     run_path = args.run
@@ -277,6 +307,18 @@ def main():
     else:
         health_list = health
 
+    # Safety guard: never let a broken run blank the live app. A run is "degraded" if it
+    # produced zero items, or if more than half of all sources errored (a mass-fetch failure,
+    # e.g. a network-allowlist regression). In that case refuse to overwrite — the last good
+    # web/data/*.json stays live — and exit non-zero so the caller skips the commit/push.
+    # A genuinely quiet news day is NOT degraded (sources healthy, just few items), so the
+    # guard keys on source errors, not item count alone. Override with --force.
+    ok, reason = publish_ok(items, health_list)
+    if not ok and not args.force:
+        print(f"REFUSING TO PUBLISH: {reason}", file=sys.stderr)
+        print("Kept the last good web/data/*.json. Re-run with --force to override.", file=sys.stderr)
+        return 2
+
     os.makedirs(args.out, exist_ok=True)
 
     def write(name, payload):
@@ -291,7 +333,7 @@ def main():
         "default_scope": primary_code,
         "scopes": (
             [{"code": primary_code, "label": primary.get("display_name", primary_code),
-              "short": "Ravens" if primary_code == "BAL" else primary_code, "role": "primary"}]
+              "short": (primary.get("display_name") or primary_code).split()[-1], "role": "primary"}]
             + [{"code": "national", "label": "NFL", "short": "NFL", "role": "national"}]
             + [{"code": r["team_code"], "label": r.get("display_name", r["team_code"]),
                 "short": (r.get("display_name") or r["team_code"]).split()[-1], "role": "rival"}
@@ -318,7 +360,8 @@ def main():
     })
     print(f"run log: {run_path}")
     print(f"items in window: {len(items)}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main() or 0)

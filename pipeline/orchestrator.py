@@ -220,7 +220,7 @@ def main() -> int:
         "team_coverage": _team_coverage_meta(config),
         "structured_data": structured_items,
         "podcast_items": podcast_items,
-        "raw_items": news_items,  # news + analysis + twitter; minus structured + podcasts + feed_only
+        "news_items": news_items,  # news + analysis + twitter; minus structured + podcasts + feed_only
         "tweet_feeds": tweet_feeds,  # per-tab raw tweet pool for the Tweet Feed UI (verbatim, not synthesized)
         "totals": {
             "raw_in": len(raw_items),
@@ -254,6 +254,28 @@ def main() -> int:
     return 0
 
 
+def _twitter_source(tw, *, src_id, tier, feed_tab_key, twitter_path, twitter_endpoint,
+                     team_code=None):
+    """Build one Twitter source dict. Single definition for the national / primary / rival
+    handle lists so a change to the source shape happens in exactly one place."""
+    src = {
+        "id": src_id,
+        "name": tw.get("name") or tw["handle"],
+        "handle": tw["handle"],
+        "fetch": "twitter",
+        "tier": tier,
+        "twitter_path": twitter_path,
+        "twitter_endpoint": twitter_endpoint,
+        "max_items": tw.get("max_items", 30),
+        "feed": tw.get("feed", True),
+        "feed_only": tw.get("feed_only", False),
+        "feed_tab_key": feed_tab_key,
+    }
+    if team_code is not None:
+        src["team_code"] = team_code
+    return src
+
+
 def _collect_sources(config: dict[str, Any], restrict: list[str] | None = None) -> list[dict[str, Any]]:
     """Flatten sources.yaml into a single list of enabled source dicts."""
     out: list[dict[str, Any]] = []
@@ -278,21 +300,9 @@ def _collect_sources(config: dict[str, Any], restrict: list[str] | None = None) 
             src_id = f"twitter_{tier_short}_{handle}"
             if restrict and src_id not in restrict:
                 continue
-            out.append(
-                {
-                    "id": src_id,
-                    "name": tw.get("name") or handle,
-                    "handle": handle,
-                    "fetch": "twitter",
-                    "tier": tier,
-                    "twitter_path": twitter_path,
-                    "twitter_endpoint": twitter_endpoint,
-                    "max_items": tw.get("max_items", 30),
-                    "feed": tw.get("feed", True),
-                    "feed_only": tw.get("feed_only", False),
-                    "feed_tab_key": "national",
-                }
-            )
+            out.append(_twitter_source(
+                tw, src_id=src_id, tier=tier, feed_tab_key="national",
+                twitter_path=twitter_path, twitter_endpoint=twitter_endpoint))
 
     # team_coverage: drives the Ravens + Rivals tabs in the digest. Primary's news/twitter
     # sources are emitted with ids like `ravens_news_<slug>` / `ravens_twitter_<handle>` (the
@@ -317,22 +327,10 @@ def _collect_sources(config: dict[str, Any], restrict: list[str] | None = None) 
         src_id = f"ravens_twitter_{handle}"
         if restrict and src_id not in restrict:
             continue
-        out.append(
-            {
-                "id": src_id,
-                "name": tw.get("name") or handle,
-                "handle": handle,
-                "fetch": "twitter",
-                "tier": "team_primary_twitter",
-                "team_code": primary.get("team_code"),
-                "twitter_path": twitter_path,
-                "twitter_endpoint": twitter_endpoint,
-                "max_items": tw.get("max_items", 30),
-                "feed": tw.get("feed", True),
-                "feed_only": tw.get("feed_only", False),
-                "feed_tab_key": "ravens",
-            }
-        )
+        out.append(_twitter_source(
+            tw, src_id=src_id, tier="team_primary_twitter", feed_tab_key="ravens",
+            twitter_path=twitter_path, twitter_endpoint=twitter_endpoint,
+            team_code=primary.get("team_code")))
 
     for rival in team_coverage.get("rivals") or []:
         team_code = rival.get("team_code") or ""
@@ -353,22 +351,11 @@ def _collect_sources(config: dict[str, Any], restrict: list[str] | None = None) 
             src_id = f"rival_{team_code_lower}_twitter_{handle}"
             if restrict and src_id not in restrict:
                 continue
-            out.append(
-                {
-                    "id": src_id,
-                    "name": tw.get("name") or handle,
-                    "handle": handle,
-                    "fetch": "twitter",
-                    "tier": "team_rival_twitter",
-                    "team_code": team_code,
-                    "twitter_path": twitter_path,
-                    "twitter_endpoint": twitter_endpoint,
-                    "max_items": tw.get("max_items", 30),
-                    "feed": tw.get("feed", True),
-                    "feed_only": tw.get("feed_only", False),
-                    "feed_tab_key": f"rivals.{team_code.upper()}",
-                }
-            )
+            out.append(_twitter_source(
+                tw, src_id=src_id, tier="team_rival_twitter",
+                feed_tab_key=f"rivals.{team_code.upper()}",
+                twitter_path=twitter_path, twitter_endpoint=twitter_endpoint,
+                team_code=team_code))
     return out
 
 

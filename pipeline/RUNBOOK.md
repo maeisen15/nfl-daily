@@ -36,7 +36,7 @@ publish — the app would go blank. Stop and leave the repo untouched.
 
 ## 3. Synthesize the digest
 
-Read `runtime/package.json` (keys: `team_coverage`, `structured_data`, `raw_items`,
+Read `runtime/package.json` (keys: `team_coverage`, `structured_data`, `news_items`,
 `source_health`, `run_log_path`, `prompt_path`). Then read `prompts/digest.md` — the single,
 self-contained synthesis prompt (output structure + rubrics + hard rules). Write the multi-tab
 slim digest exactly per that prompt.
@@ -68,9 +68,17 @@ python3 pipeline/publish.py
 ```
 
 Writes `web/data/config.json`, `web/data/feed.json`, `web/data/digest.json` from the newest run
-log. Verify feed.json is non-trivial (items count > 0) before continuing.
+log.
+
+**Safety guard:** publish.py refuses to write and exits non-zero (code 2) if the run is
+degraded — zero items, or more than half of sources errored (suspected mass-fetch failure).
+This protects the live app: a broken run keeps the last good data instead of blanking the app.
+If it refuses, do NOT commit — stop and report the reason. Only pass `--force` if you have
+confirmed the empty result is a genuinely quiet news day, not a fetch failure.
 
 ## 5. Ship
+
+Only if publish.py succeeded (exit 0):
 
 ```bash
 git add web/data
@@ -83,6 +91,6 @@ Push directly to main — no PR. The Pages workflow deploys automatically (~1 mi
 ## Failure handling
 
 - Single-source errors: proceed; they surface in the app's source-health section.
-- Synthesis impossible (no items at all): still run publish.py so the feed timestamps advance,
-  and note the empty window in the commit message.
+- publish.py refused (exit 2): the run was degraded. Do not commit — the last good data stays
+  live. Report the reason it printed. Don't `--force` unless you've verified it's a quiet day.
 - Push rejected (rare race): pull --rebase and push again.

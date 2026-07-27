@@ -19,6 +19,8 @@ Pushing to `main` auto-deploys the app via GitHub Pages. No local machine requir
 - `config/sources.yaml` — sources, teams (primary + rivals), and Twitter handles/flags
 - `web/` — the PWA (index.html / app.js / app.css / sw.js) and its generated `data/`
 - `docs/network-allowlist.txt` — domains the cloud environment must allow (keep in sync with sources)
+- `scripts/check_allowlist.py` — verifies every source domain is covered by the allowlist
+- `tests/test_publish.py` — smoke test for date parsing + the publish transform (`python3 tests/test_publish.py`)
 
 ## Adding a source
 

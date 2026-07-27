@@ -16,7 +16,7 @@ You receive a synthesis package with these keys:
 - `structured_data` — items from `espn_injuries`, `espn_transactions`, `nfl_com_injuries`,
   `nfl_com_transactions`. **This is the ONLY ground truth for the Transactions and Injuries
   sections.** Never write a transaction or injury bullet that isn't backed by an item here.
-- `raw_items` — news / analysis / Twitter items, already filtered to the recency window.
+- `news_items` — news / analysis / Twitter items, already filtered to the recency window.
 - `source_health` — per-source `{status, items_fetched, latency_ms, note}`.
 
 Every run is a self-contained snapshot of the past N days. No cross-run state; no multi-day

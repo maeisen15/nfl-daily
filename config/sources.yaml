@@ -73,7 +73,7 @@ structured_data:
     name: "ESPN Injuries (API)"
     fetch: "espn_api"
     type: "espn_injuries"
-    # Single league-wide endpoint discovered in Phase 0 (see api-discovery-notes.md).
+    # Single league-wide endpoint returning expanded data in one call.
     # Returns expanded data in one call — simpler than the per-team-id loop in the original plan.
     link_destination: "https://www.espn.com/nfl/injuries"
     max_items: 200
@@ -100,6 +100,7 @@ structured_data:
     link_pattern: "^/players/[a-z0-9-]+/"
     link_base: "https://www.nfl.com"
     title_strategy: "anchor_text"
+    assume_current: true   # status page has no per-item dates; treat items as current (see html.py)
     max_items: 80
     enabled: true
 
@@ -113,6 +114,7 @@ structured_data:
     link_pattern: "^/players/[a-z0-9-]+/"
     link_base: "https://www.nfl.com"
     title_strategy: "anchor_text"
+    assume_current: true   # status page has no per-item dates; treat items as current (see html.py)
     max_items: 80
     enabled: true
 
