@@ -88,12 +88,29 @@ git push origin main
 
 Push directly to main — no PR. The Pages workflow deploys automatically (~1 min).
 
+## 6. Verify the deploy landed
+
+A successful push is not a successful deploy. Always finish with:
+
+```bash
+python3 scripts/verify_deploy.py
+```
+
+It polls the live site until it serves the run_id you just published, and exits non-zero if it
+never does. Do not report the run as complete until this passes — without it, a failed deploy
+looks identical to a good one and the app quietly serves yesterday's news.
+
 ## Failure handling
 
 - Single-source errors: proceed; they surface in the app's source-health section.
 - publish.py refused (exit 2): the run was degraded. Do not commit — the last good data stays
   live. Report the reason it printed. Don't `--force` unless you've verified it's a quiet day.
 - Push rejected (rare race): pull --rebase and push again.
+- **verify_deploy.py failed (step 6):** the data is committed and pushed — only the deploy is
+  missing, so nothing needs re-fetching. Check the Actions tab for a failed or missing run,
+  then githubstatus.com for an Actions/Pages incident (an outage stops deploys even though the
+  push succeeded). If Actions is healthy, any new push to main re-triggers the deploy. Report
+  the app as stale until it passes.
 - **ESPN structured data failed (`espn_injuries` / `espn_transactions` in `error`, or
   publish.py printed the 0-transactions/0-injuries warning):** ESPN's API sits behind Akamai,
   which denies some callers — datacenter egress IPs far more than residential ones. The
