@@ -94,3 +94,11 @@ Push directly to main — no PR. The Pages workflow deploys automatically (~1 mi
 - publish.py refused (exit 2): the run was degraded. Do not commit — the last good data stays
   live. Report the reason it printed. Don't `--force` unless you've verified it's a quiet day.
 - Push rejected (rare race): pull --rebase and push again.
+- **ESPN structured data failed (`espn_injuries` / `espn_transactions` in `error`, or
+  publish.py printed the 0-transactions/0-injuries warning):** ESPN's API sits behind Akamai,
+  which denies some callers — datacenter egress IPs far more than residential ones. The
+  fetcher already retries three times across two hosts before reporting an error. If it still
+  failed, re-run just the fetch once (step 2) — the denials are intermittent and a second pass
+  often succeeds. If it fails again, publish anyway (news is unaffected), leave
+  Transactions/Injuries empty per the grounding rule, and say so in the commit message. Never
+  backfill those sections from news articles.

@@ -319,6 +319,20 @@ def main():
         print("Kept the last good web/data/*.json. Re-run with --force to override.", file=sys.stderr)
         return 2
 
+    # Structured data (transactions + injuries) can fail on its own while news sources stay
+    # healthy — ESPN's API is behind Akamai and denies some callers. That isn't degraded enough
+    # to block the publish (264 news items still beat a stale app), but it does silently blank
+    # the Transactions and Injuries sections, which reads as "the run failed". Say so loudly so
+    # the run reports it instead of shipping quiet holes.
+    structured_count = sum(1 for i in items if i["type"] in ("transaction", "injury"))
+    if structured_count == 0:
+        bad = [h for h in health_list
+               if h.get("id", "").startswith("espn_") and h.get("status") != "ok"]
+        print("WARNING: 0 transactions and 0 injuries — Transactions/Injuries sections will be "
+              "blank in every tab.", file=sys.stderr)
+        for h in bad:
+            print(f"  {h.get('id')}: {h.get('status')} — {h.get('note')}", file=sys.stderr)
+
     os.makedirs(args.out, exist_ok=True)
 
     def write(name, payload):

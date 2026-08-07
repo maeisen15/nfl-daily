@@ -7,6 +7,9 @@
 # Both apex (example.com) and wildcard (*.example.com) forms are required: sources serve from
 # www. and hidden-API subdomains, and the sandbox does NOT treat the apex as covering www.
 #
+# Multi-label hosts (a.b.example.com) are ALSO listed in full below, since a single-label
+# wildcard would not cover them.
+#
 # When you add a new source to config/sources.yaml, add its domain here (both forms) too, or
 # the cloud run will get a 403 at the proxy and that source will show "error" in source health.
 
@@ -20,6 +23,8 @@ cbssports.com
 *.cbssports.com
 espn.com
 *.espn.com
+site.api.espn.com
+site.web.api.espn.com
 foxsports.com
 *.foxsports.com
 megaphone.fm
