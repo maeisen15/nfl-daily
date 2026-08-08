@@ -31,7 +31,9 @@ Personal NFL app for Matt. Replaces (deprecates) the local `nfl-digest` HTML sit
 
 - `config.json` — scopes, labels, default scope. Generated from sources.yaml.
 - `feed.json` — all window items: tweets, articles, transactions, injuries. Each item: id, type,
-  scopes[], source, title/text, url, published_at, author (tweets), team (txn/injury), media[] (future).
+  scopes[], source, title/text, url, published_at, author (tweets), team (txn/injury), media[].
+  Tweets also carry `quoted` — the post this one quotes, as {author_handle, author_name, text,
+  url, published_at, media[]}, or null. One level deep; a quote of a quote is not followed.
 - `digest.json` — per-scope digest markdown + generated_at.
 
 ## Phases
@@ -43,6 +45,9 @@ Personal NFL app for Matt. Replaces (deprecates) the local `nfl-digest` HTML sit
 
 ## Known gaps / future
 
-- Tweet media (images) not captured by current fetcher — add to fetcher in Phase 4 so tweet cards can show images.
+- Self-threads are dropped: `_build_tweet_feeds` filters all replies, so an analyst's multi-tweet
+  thread shows only its first post. Keeping replies-to-self would recover the rest.
+- Link previews: `cleanTweet` strips t.co stubs, so a tweet linking to an article shows no link.
+  `entities.urls[].expanded_url` has the real destination if this is worth rendering.
 - Push notifications — future.
 - Hourly fetch-only refresh — future, cost-gated.

@@ -421,6 +421,7 @@ def _build_tweet_feeds(
                 "text": it.get("text") or it.get("title") or "",
                 "published_at": it.get("published_at"),
                 "media": it.get("media") or [],
+                "quoted": it.get("quoted"),
             }
         )
 

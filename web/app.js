@@ -137,22 +137,22 @@ const render = {
     const items = scoped("tweet");
     if (!items.length) return [empty("No tweets in this window.")];
     return withDayLabels(items, t => {
-      const a = card(t.url);
-      a.innerHTML = `
+      // Deliberately a div, not a link: the card holds interactive content (video controls,
+      // a quoted post with its own link), so a tap anywhere must not navigate off to X.
+      // Leaving is an explicit choice via the "Open on X" action below.
+      const d = document.createElement("div");
+      d.className = "card tweet-card";
+      d.innerHTML = `
         <div class="card-meta">
           <span class="src">${esc(t.author_name || t.source_name || "")}</span>
           <span class="handle">@${esc(t.author_handle || "")}</span>
           <span class="when">${relTime(new Date(t.published_at))}</span>
         </div>
         <div class="tweet-text">${esc(cleanTweet(t.text || ""))}</div>
-        ${tweetMedia(t.media)}`;
-      // The card is a link to X; keep taps on the inline video from navigating away.
-      if (a.querySelector("video")) {
-        a.addEventListener("click", (e) => {
-          if (e.target.closest("video")) e.preventDefault();
-        });
-      }
-      return a;
+        ${tweetMedia(t.media)}
+        ${quotedTweet(t.quoted)}
+        <div class="card-actions">${xLink(t.url, "Open on X")}</div>`;
+      return d;
     });
   },
 
@@ -295,6 +295,29 @@ function tweetMedia(media) {
     </div>`;
   }).join("");
   return `<div class="tweet-media ${media.length > 1 ? "grid" : ""}">${items}</div>`;
+}
+
+function quotedTweet(q) {
+  // A quoted post renders as a nested card with its own text and media, so the whole point
+  // of the quote is readable without a trip to X. Its video plays inline like any other.
+  if (!q) return "";
+  const when = q.published_at ? relTime(new Date(q.published_at)) : "";
+  return `<div class="quoted">
+    <div class="card-meta">
+      <span class="q-name">${esc(q.author_name || "")}</span>
+      <span class="handle">@${esc(q.author_handle || "")}</span>
+      ${when ? `<span class="when">${esc(when)}</span>` : ""}
+    </div>
+    ${q.text ? `<div class="tweet-text">${esc(cleanTweet(q.text))}</div>` : ""}
+    ${tweetMedia(q.media)}
+    ${q.url ? `<div class="card-actions">${xLink(q.url, "Open quoted post")}</div>` : ""}
+  </div>`;
+}
+
+function xLink(url, label) {
+  // Same http(s)-only guard as card(): an anchor runs a javascript: href on tap.
+  if (!/^https?:\/\//i.test(url || "")) return "";
+  return `<a class="x-link" href="${esc(url)}" target="_blank" rel="noopener">${esc(label)} ↗</a>`;
 }
 
 function cleanTweet(text) {

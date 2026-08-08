@@ -176,6 +176,7 @@ def _normalize_rss_entry(source_id: str, handle: str, entry: Any) -> dict[str, A
         "is_retweet": _looks_like_retweet(title) or _looks_like_retweet(text_full),
         "is_reply": _looks_like_reply(title) or _looks_like_reply(text_full),
         "media": [],  # RSSHub path doesn't expose structured media
+        "quoted": None,  # nor quoted tweets
     }
 
 
@@ -203,6 +204,36 @@ def _normalize_twitterapi_tweet(source_id: str, handle: str, tw: dict[str, Any])
         "is_retweet": is_retweet,
         "is_reply": is_reply,
         "media": _extract_media(tw),
+        "quoted": _extract_quoted(tw),
+    }
+
+
+def _extract_quoted(tw: dict[str, Any]) -> dict[str, Any] | None:
+    """The post this tweet quotes, flattened for the app's nested card.
+
+    twitterapi.io returns `quoted_tweet` as a full tweet object — same shape as the outer
+    one, including `author` and `extendedEntities` — so media extraction is identical and a
+    quoted video is playable inline just like a top-level one. Only one level is followed:
+    a quote of a quote renders as a single nested card, not a chain.
+    """
+    q = tw.get("quoted_tweet")
+    if not isinstance(q, dict):
+        return None
+    author = q.get("author") or {}
+    handle = author.get("userName") or ""
+    quoted_id = q.get("id") or ""
+    text = (q.get("text") or "").strip()
+    media = _extract_media(q)
+    if not text and not media:
+        return None  # nothing to show (deleted/protected) — fall back to the plain card
+    return {
+        "author_handle": handle,
+        "author_name": author.get("name") or handle,
+        "text": text,
+        "url": (q.get("url") or "").strip()
+        or (f"https://twitter.com/{handle}/status/{quoted_id}" if quoted_id else ""),
+        "published_at": _twitter_date_to_iso(q.get("createdAt")),
+        "media": media,
     }
 
 
