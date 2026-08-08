@@ -2,6 +2,11 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<!-- video.twimg.com hotlink-protects: it 403s any request carrying a non-Twitter Referer, which
+     renders inline tweet video as a black box with a disabled play button. Suppressing the
+     referrer entirely gets a normal 206. This has to be a document-level policy — <video> has no
+     referrerpolicy attribute. Images (pbs.twimg.com) are unaffected either way. -->
+<meta name="referrer" content="no-referrer">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' https: data:; media-src 'self' https:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>NFL Daily</title>
