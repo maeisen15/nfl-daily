@@ -1,0 +1,63 @@
+# Completeness sweeps for the tweet store.
+#
+# Tweets normally arrive live: twitterapi.io pushes each match to the Worker within about a
+# minute. These sweeps exist to catch what that path can miss, and they cover two different
+# failure modes:
+#
+#   daily   Advanced Search over the last 26 hours. Catches tweets the webhook never delivered
+#           (a Worker blip, a paused rule) and backfills media/quoted posts if a webhook payload
+#           arrived thin.
+#   weekly  The per-handle last_tweets endpoint. Slower and more expensive — it bills a full
+#           20-tweet page per handle — but it does not depend on Twitter's search index, which
+#           is the one blind spot the daily sweep shares with the webhook.
+#
+# Both write into the same store keyed by tweet id, so a tweet already present is a no-op.
+# Neither deploys; the next hourly refresh picks the results up.
+
+name: Tweet sweeps
+
+on:
+  schedule:
+    - cron: "43 9 * * *"    # daily  — 5:43am ET / 9:43 UTC, a quiet hour
+    - cron: "23 10 * * 1"   # weekly — Monday 6:23am ET
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Sweep mode"
+        required: true
+        default: search
+        type: choice
+        options: [search, backstop]
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pipeline/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r pipeline/requirements.txt
+
+      - name: Sweep
+        env:
+          TWITTERAPI_IO_KEY: ${{ secrets.TWITTERAPI_IO_KEY }}
+          NFL_DAILY_WORKER_URL: ${{ secrets.NFL_DAILY_WORKER_URL }}
+          NFL_DAILY_PUSH_SECRET: ${{ secrets.NFL_DAILY_PUSH_SECRET }}
+        run: |
+          if [ "${{ github.event.schedule }}" = "23 10 * * 1" ]; then
+            MODE=backstop
+          else
+            MODE="${{ github.event.inputs.mode || 'search' }}"
+          fi
+          echo "sweep mode: $MODE"
+          if [ "$MODE" = "backstop" ]; then
+            python3 pipeline/tweets.py --mode backstop
+          else
+            python3 pipeline/tweets.py --mode search --since-hours 26
+          fi

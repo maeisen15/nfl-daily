@@ -4,6 +4,9 @@ const state = {
   config: null, feed: null, digest: null,
   scope: null,
   tab: "home",
+  liveTweets: null,      // from the Worker; null until loaded, [] if it had none
+  tweetsStale: false,    // true when we fell back to the tweets baked into feed.json
+  authorFilter: new Set(),
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -77,6 +80,47 @@ async function init() {
   renderView();
 
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+
+  // Tweets arrive live from the Worker, so they're fetched separately and the first paint
+  // isn't blocked on them. Until this resolves the app shows the tweets baked into feed.json.
+  loadLiveTweets().then(() => {
+    renderUpdated();
+    if (state.tab === "tweets") renderView();
+  });
+
+  // Coming back to the app after a while should show what happened while it was closed.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") refresh();
+  });
+}
+
+async function loadLiveTweets() {
+  const base = (state.config && state.config.tweets_url) || "";
+  if (!base) { state.tweetsStale = true; return; }
+  try {
+    const res = await fetch(`${base}/tweets?hours=48&limit=500`, { cache: "no-store" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const body = await res.json();
+    state.liveTweets = Array.isArray(body.items) ? body.items : [];
+    state.tweetsStale = false;
+  } catch {
+    // Worker unreachable or offline: keep whatever feed.json carried rather than blanking
+    // the tab, and say so in the header.
+    state.tweetsStale = true;
+  }
+}
+
+let refreshing = false;
+async function refresh() {
+  if (refreshing) return;
+  refreshing = true;
+  try {
+    await loadLiveTweets();
+    renderUpdated();
+    if (state.tab === "tweets") renderView();
+  } finally {
+    refreshing = false;
+  }
 }
 
 /* ---------- chrome ---------- */
@@ -91,7 +135,9 @@ function renderScopes() {
     btn.onclick = () => {
       state.scope = s.code;
       localStorage.setItem("scope", s.code);
+      state.authorFilter.clear();   // an author chip from the Ravens tab means nothing on NFL
       renderScopes();
+      renderUpdated();
       renderView();
     };
     nav.appendChild(btn);
@@ -100,8 +146,15 @@ function renderScopes() {
 }
 
 function renderUpdated() {
-  const dt = new Date(state.feed.generated_at);
-  $("#updated").textContent = isNaN(dt) ? "" : `Updated ${relTime(dt)}`;
+  // On the Tweets tab the number that matters is how old the newest tweet is, not when the
+  // article pipeline last ran.
+  let dt = new Date(state.feed.generated_at);
+  if (state.tab === "tweets" && state.liveTweets && state.liveTweets.length) {
+    const newest = new Date(state.liveTweets[0].published_at);
+    if (!isNaN(newest)) dt = newest;
+  }
+  const suffix = state.tweetsStale && state.tab === "tweets" ? " · offline" : "";
+  $("#updated").textContent = isNaN(dt) ? "" : `Updated ${relTime(dt)}${suffix}`;
 }
 
 function bindTabs() {
@@ -109,6 +162,7 @@ function bindTabs() {
     btn.onclick = () => {
       state.tab = btn.dataset.tab;
       document.querySelectorAll(".tab").forEach(b => b.classList.toggle("is-active", b === btn));
+      renderUpdated();
       renderView();
       window.scrollTo(0, 0);
     };
@@ -134,18 +188,36 @@ const render = {
   },
 
   tweets() {
-    const items = scoped("tweet");
-    if (!items.length) return [empty("No tweets in this window.")];
-    return withDayLabels(items, t => {
+    const all = tweetsForScope();
+    if (!all.length) {
+      return [empty(state.tweetsStale
+        ? "No tweets cached for this view. Reconnect to load the latest."
+        : "No tweets in this window.")];
+    }
+
+    // Filter chips are built from everyone present in this scope, so the counts stay honest
+    // even when a filter is active.
+    const chips = authorChips(all);
+    const items = state.authorFilter.size
+      ? all.filter(t => state.authorFilter.has(t.author_handle))
+      : all;
+
+    if (!items.length) return [chips, empty("No tweets from the selected accounts.")];
+
+    return [chips, ...withDayLabels(items, t => {
       // Deliberately a div, not a link: the card holds interactive content (video controls,
       // a quoted post with its own link), so a tap anywhere must not navigate off to X.
       // Leaving is an explicit choice via the "Open on X" action below.
       const d = document.createElement("div");
       d.className = "card tweet-card";
+      const badge = t.is_retweet
+        ? `<span class="tag tag-rt">RT${t.rt_author ? ` @${esc(t.rt_author)}` : ""}</span>`
+        : (t.is_self_thread ? `<span class="tag tag-thread">thread</span>` : "");
       d.innerHTML = `
         <div class="card-meta">
           <span class="src">${esc(t.author_name || t.source_name || "")}</span>
           <span class="handle">@${esc(t.author_handle || "")}</span>
+          ${badge}
           <span class="when">${relTime(new Date(t.published_at))}</span>
         </div>
         <div class="tweet-text">${esc(cleanTweet(t.text || ""))}</div>
@@ -153,7 +225,7 @@ const render = {
         ${quotedTweet(t.quoted)}
         <div class="card-actions">${xLink(t.url, "Open on X")}</div>`;
       return d;
-    });
+    })];
   },
 
   articles() {
@@ -175,6 +247,59 @@ const render = {
 
 function scoped(type) {
   return state.feed.items.filter(i => i.type === type && i.scopes.includes(state.scope));
+}
+
+/* Live tweets from the Worker when we have them, otherwise whatever the last pipeline run
+ * baked into feed.json. The two carry the same fields, so nothing downstream cares which. */
+function tweetsForScope() {
+  const live = state.liveTweets;
+  const items = live && live.length ? live : scoped("tweet");
+  return items
+    .filter(t => (t.scopes || []).includes(state.scope))
+    .sort((a, b) => (a.published_at < b.published_at ? 1 : -1));
+}
+
+function authorChips(items) {
+  const counts = new Map();
+  for (const t of items) {
+    const handle = t.author_handle || "";
+    if (!handle) continue;
+    const entry = counts.get(handle) || { name: t.author_name || handle, n: 0 };
+    entry.n++;
+    counts.set(handle, entry);
+  }
+  const authors = [...counts.entries()].sort((a, b) => b[1].n - a[1].n);
+
+  const row = document.createElement("div");
+  row.className = "chips";
+  row.setAttribute("aria-label", "Filter by account");
+
+  const makeChip = (label, active, onTap) => {
+    const b = document.createElement("button");
+    b.className = "chip" + (active ? " is-active" : "");
+    b.textContent = label;
+    b.setAttribute("aria-pressed", String(active));
+    b.onclick = () => { onTap(); renderView(); };
+    return b;
+  };
+
+  row.appendChild(makeChip("All", state.authorFilter.size === 0,
+    () => state.authorFilter.clear()));
+
+  for (const [handle, { name, n }] of authors) {
+    // Beat writers are known by name, so the chip shows the name and keeps the handle as the
+    // key — "Jonas Shaffer" is findable in a way "@jonas_shaffer" is not.
+    row.appendChild(makeChip(`${shortName(name)} ${n}`, state.authorFilter.has(handle), () => {
+      if (state.authorFilter.has(handle)) state.authorFilter.delete(handle);
+      else state.authorFilter.add(handle);
+    }));
+  }
+  return row;
+}
+
+// "Jeff Zrebiec (The Athletic)" -> "Jeff Zrebiec" — the outlet is noise on a chip.
+function shortName(name) {
+  return String(name || "").replace(/\s*\(.*$/, "").trim() || name;
 }
 
 function card(url) {

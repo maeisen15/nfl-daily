@@ -1,0 +1,66 @@
+# Hourly refresh: articles, transactions, injuries — plus whatever tweets the Worker has
+# accumulated — published straight to Pages.
+#
+# Nothing is committed here. feed.json changes every hour and committing it would add roughly a
+# megabyte of git objects a day; the deploy artifact is built from the checkout plus the freshly
+# written web/data, so the live site is current without the history churn. The once-daily
+# synthesis run is what commits, and that is what keeps digest.json in the repo.
+#
+# This costs nothing: article sources are RSS/HTML scrapes, reading tweets back from our own
+# Worker is free, and Actions minutes are unlimited on a public repo.
+
+name: Hourly refresh
+
+on:
+  schedule:
+    # :17 rather than :00 — GitHub's scheduler is heavily contended on the hour and delays runs.
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Share the Pages group with the deploy workflow, but never cancel a run in flight: the daily
+# digest deploy must not be killed by an hourly refresh that happens to overlap it.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pipeline/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r pipeline/requirements.txt
+
+      - name: Fetch sources
+        env:
+          NFL_DAILY_WORKER_URL: ${{ secrets.NFL_DAILY_WORKER_URL }}
+        run: |
+          mkdir -p runtime
+          python3 pipeline/orchestrator.py --days 1 --summary-only
+
+      - name: Publish app data
+        env:
+          NFL_DAILY_WORKER_URL: ${{ secrets.NFL_DAILY_WORKER_URL }}
+        run: python3 pipeline/publish.py
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - id: deployment
+        uses: actions/deploy-pages@v4

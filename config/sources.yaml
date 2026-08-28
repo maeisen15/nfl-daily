@@ -159,18 +159,21 @@ podcasts:
     enabled: true
 
 # ---- Twitter ------------------------------------------------------------------------------
-# Tweets are fetched via twitterapi.io (twitter_path: "twitterapi_io" below). The API key is
-# TWITTERAPI_IO_KEY — an env var in the cloud routine, or ~/.nfl-digest/secrets.env locally.
-# (The rsshub/localhost path is legacy and inactive; twitter_endpoint is only read for it.)
+# Tweets do NOT flow through the orchestrator. twitterapi.io watches these handles and pushes
+# each new tweet to the Cloudflare Worker (worker/) within about a minute; the app reads them
+# from there. Two sweeps in .github/workflows/tweets-sweep.yml backfill anything that path
+# misses. See docs/SETUP.md.
 #
-# Per-handle feed flags:
-#   feed:      true → tweets surface in the per-tab Tweet Feed UI (default: true)
-#   feed_only: true → tweets ONLY appear in the feed and are NOT passed to digest synthesis
-#                     (default: false → "dual-use": feed AND synthesis)
-# Missing flags preserve original behavior (feed=true, feed_only=false).
-# Routing: twitter_news_* / twitter_analysis_* → National feed.
-#          ravens_twitter_*                    → Ravens feed.
-#          rival_<code>_twitter_*              → Rivals feed (that team's subtab).
+# This list is the single source of truth for who is watched. After editing it:
+#   python3 pipeline/rules.py sync --activate     # update the twitterapi.io filter rules
+# The handle -> scope map is pushed to the Worker automatically on the next sweep.
+#
+# Per-handle flags:
+#   feed:      true → tweets appear in the app's Tweets tab (default: true)
+#   feed_only: true → tweets appear in the Tweets tab but are NOT quotable by the digest
+#                     (default: false → the digest may cite them)
+# Routing: twitter_news_* / twitter_analysis_* → NFL tab. Handles under team_coverage.primary
+# → Ravens tab. Handles under a rival → that rival's tab.
 
 twitter_news_handles:
   - handle: "AdamSchefter"
@@ -215,9 +218,6 @@ twitter_analysis_handles:
     enabled: true
     feed: true
     feed_only: true
-
-twitter_path: "twitterapi_io"      # rsshub | twitterapi_io | disabled
-twitter_endpoint: "http://localhost:1200"  # only used when twitter_path == rsshub
 
 # ---- Team coverage --------------------------------------------------------------------------
 # Drives the Ravens and Rivals tabs in the web viewer. One `primary` team (Ravens) plus a list
