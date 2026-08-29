@@ -12,6 +12,10 @@
 #
 # When you add a new source to config/sources.yaml, add its domain here (both forms) too, or
 # the cloud run will get a 403 at the proxy and that source will show "error" in source health.
+#
+# workers.dev is not a content source: it's the Cloudflare Worker that holds the tweet store.
+# The daily run reads tweets from it and pushes the reconciliation sweep to it, so a missing
+# entry here shows up as `twitter_worker: error` and a digest written without any tweets.
 
 acast.com
 *.acast.com
@@ -47,3 +51,5 @@ theringer.com
 *.theringer.com
 twitterapi.io
 *.twitterapi.io
+workers.dev
+*.workers.dev

@@ -13,6 +13,7 @@ Usage:
 import argparse
 import glob
 import hashlib
+import html
 import json
 import os
 import re
@@ -57,6 +58,21 @@ STRUCTURED_TYPE_BY_SOURCE = {
     "espn_injuries": "injury",
     "nfl_com_injuries": "injury",
 }
+
+
+def clean_text(value):
+    """Undo the HTML entity escaping publishers leave in feed content.
+
+    RSS descriptions arrive with `&#8217;` for an apostrophe and Twitter serves tweet text with
+    `&amp;` for an ampersand. The app escapes once at render time, so an entity that survives
+    to here gets escaped a second time and reaches the screen as a literal "&amp;".
+    Unescaping twice is deliberate: some feeds double-encode (`&amp;#8217;`).
+    """
+    if not value or not isinstance(value, str):
+        return value
+    out = html.unescape(html.unescape(value))
+    # Feeds occasionally carry a stray NUL or control char that breaks JSON consumers.
+    return re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", out)
 
 
 def parse_dt(value):
@@ -193,7 +209,7 @@ def build_items(run, primary_code, rival_codes):
                 "source_id": t.get("source_id"),
                 "source_name": t.get("author_name"),
                 "title": None,
-                "text": t.get("text"),
+                "text": clean_text(t.get("text")),
                 "url": t.get("url"),
                 "published_at": dt.isoformat(),
                 "author_handle": t.get("author_handle"),
@@ -201,6 +217,9 @@ def build_items(run, primary_code, rival_codes):
                 "team": None,
                 "media": t.get("media") or [],
                 "quoted": t.get("quoted"),
+                "is_retweet": bool(t.get("is_retweet")),
+                "is_self_thread": bool(t.get("is_self_thread")),
+                "rt_author": t.get("rt_author"),
             }, ("tweet", t.get("tweet_id") or t.get("url")))
 
     # Articles + structured rows
@@ -226,8 +245,8 @@ def build_items(run, primary_code, rival_codes):
                 "scopes": scopes,
                 "source_id": sid,
                 "source_name": None,  # filled from sources.yaml below
-                "title": r.get("title"),
-                "text": r.get("snippet"),
+                "title": clean_text(r.get("title")),
+                "text": clean_text(r.get("snippet")),
                 "url": r.get("url"),
                 "published_at": dt.isoformat(),
                 "author_handle": None,
@@ -242,12 +261,12 @@ def build_items(run, primary_code, rival_codes):
                 "scopes": article_scopes(sid, set(rival_codes)),
                 "source_id": sid,
                 "source_name": None,
-                "title": r.get("title"),
-                "text": r.get("snippet"),
+                "title": clean_text(r.get("title")),
+                "text": clean_text(r.get("snippet")),
                 "url": r.get("url"),
                 "published_at": dt.isoformat(),
                 "author_handle": None,
-                "author_name": r.get("author"),
+                "author_name": clean_text(r.get("author")),
                 "team": None,
                 "media": [],
             }, ("article", r.get("url")))
@@ -346,6 +365,9 @@ def main():
         "schema_version": SCHEMA_VERSION,
         "app_name": "NFL Daily",
         "default_scope": primary_code,
+        # Where the app reads live tweets. Empty means "no live source" and the app falls back
+        # to the tweets baked into feed.json by the last pipeline run.
+        "tweets_url": (os.environ.get("NFL_DAILY_WORKER_URL") or "").rstrip("/"),
         "scopes": (
             [{"code": primary_code, "label": primary.get("display_name", primary_code),
               "short": (primary.get("display_name") or primary_code).split()[-1], "role": "primary"}]
@@ -366,13 +388,27 @@ def main():
         "items": items,
         "source_health": health_list,
     })
-    write("digest.json", {
-        "schema_version": SCHEMA_VERSION,
-        "run_id": run.get("run_id"),
-        "generated_at": generated_at,
-        "window_hours": window_hours,
-        "tabs": build_digest(run, primary, rivals),
-    })
+    # The digest is written only by the once-daily synthesis run. Frequent fetch-only runs
+    # (articles + tweets) carry no digest_outputs, and rewriting digest.json from one would
+    # blank the Home tab until the next synthesis. Leave the last good digest in place.
+    tabs = build_digest(run, primary, rivals)
+    digest_path = os.path.join(args.out, "digest.json")
+    if tabs:
+        write("digest.json", {
+            "schema_version": SCHEMA_VERSION,
+            "run_id": run.get("run_id"),
+            "generated_at": generated_at,
+            "window_hours": window_hours,
+            "tabs": tabs,
+        })
+    elif os.path.exists(digest_path):
+        with open(digest_path) as f:
+            kept = json.load(f)
+        print(f"kept existing digest.json (run has no digest_outputs) — "
+              f"generated {kept.get('generated_at')}")
+    else:
+        print("WARNING: no digest_outputs in this run and no existing digest.json — "
+              "the Home tab will be empty until a synthesis run completes.", file=sys.stderr)
     print(f"run log: {run_path}")
     print(f"items in window: {len(items)}")
     return 0

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Smoke test for the fragile, silent-failure-prone parts of the pipeline: date parsing, the
-publish safety guard, and the build_items transform (recency windows + team tagging).
+publish safety guard, the build_items transform (recency windows + team tagging), entity
+decoding, and the digest-preservation rule.
 
 Runs with plain `python3 tests/test_publish.py` — no pytest needed. Exit 0 = pass.
 
@@ -92,6 +93,38 @@ check("transaction tagged PIT via authoritative team (not ARI from title scan)",
       txn.get("team") == "PIT" and "PIT" in txn.get("scopes", []))
 inj = by_type.get("injury", [{}])[0]
 check("injury tagged BAL", inj.get("team") == "BAL" and "BAL" in inj.get("scopes", []))
+
+# ---------- clean_text ----------
+# Publishers leave HTML entities in feed content. The app escapes once at render, so an entity
+# surviving to here gets escaped twice and reaches the screen as a literal "&amp;".
+print("clean_text:")
+check("&amp; becomes &", publish.clean_text("Schatz &amp; Tanier") == "Schatz & Tanier")
+check("numeric entity becomes the character",
+      publish.clean_text("The Athletic&#8217;s") == "The Athletic\u2019s")
+check("double-encoded entity fully resolves",
+      publish.clean_text("&amp;#8217;") == "\u2019")
+check("plain text is untouched", publish.clean_text("no entities here") == "no entities here")
+check("None passes through", publish.clean_text(None) is None)
+check("control characters stripped", "\x00" not in publish.clean_text("bad\x00char"))
+
+# ---------- digest preservation ----------
+# The hourly refresh publishes runs that carry no digest_outputs. If those rewrote digest.json
+# the Home tab would blank between synthesis runs, so build_digest must yield nothing and let
+# publish.py keep the existing file.
+print("digest preservation:")
+primary = {"team_code": "BAL", "display_name": "Baltimore Ravens"}
+rivals = [{"team_code": "PIT", "display_name": "Pittsburgh Steelers"}]
+check("fetch-only run yields no tabs",
+      publish.build_digest({"digest_outputs": None}, primary, rivals) == [])
+check("empty digest_outputs yields no tabs",
+      publish.build_digest({"digest_outputs": {}}, primary, rivals) == [])
+synth = {"digest_outputs": {"national": {"full_markdown": "## A"},
+                            "ravens": {"full_markdown": "## B"},
+                            "rivals": {"PIT": {"full_markdown": "## C"}}}}
+tabs = publish.build_digest(synth, primary, rivals)
+check("synthesis run yields one tab per scope", len(tabs) == 3)
+check("primary tab is labelled from config",
+      any(t["scope"] == "BAL" and t["label"] == "Baltimore Ravens" for t in tabs))
 
 print()
 if failures:

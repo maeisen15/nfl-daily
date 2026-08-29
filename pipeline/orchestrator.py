@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """NFL Daily Digest orchestrator.
 
+Fetches the *free* sources: articles, structured data, podcasts. Tweets are NOT fetched here —
+they arrive continuously via the twitterapi.io webhook into the Cloudflare Worker (see
+pipeline/tweets.py and worker/). This orchestrator reads them back out of the Worker, which
+costs nothing and returns the already-deduplicated, retention-pruned set.
+
 Reads config/sources.yaml, fans out to fetchers in parallel, writes a timestamped run log to
 runtime/runs/<ISO8601>.json, and prints a JSON "synthesis package" to stdout that the
 synthesizing Claude consumes to produce the slim digest (see prompts/digest.md). Paths are
@@ -26,6 +31,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+import requests
 import yaml
 
 # Add the skill dir to sys.path so we can import fetchers package
@@ -36,7 +42,6 @@ from fetchers import rss as rss_fetcher  # noqa: E402
 from fetchers import api as api_fetcher  # noqa: E402
 from fetchers import html as html_fetcher  # noqa: E402
 from fetchers import espn_api as espn_api_fetcher  # noqa: E402
-from fetchers import twitter as twitter_fetcher  # noqa: E402
 
 # Repo-local by default; NFL_DAILY_RUNTIME overrides (e.g. ~/.nfl-digest for the legacy setup).
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -57,7 +62,6 @@ FETCHERS = {
     "api": api_fetcher.fetch,
     "html": html_fetcher.fetch,
     "espn_api": espn_api_fetcher.fetch,
-    "twitter": twitter_fetcher.fetch,
 }
 
 STRUCTURED_SOURCE_IDS = {
@@ -109,7 +113,6 @@ def main() -> int:
     if not sources:
         print("ERROR: no enabled sources matched the filter", file=sys.stderr)
         return 1
-    feed_routing = _build_feed_routing(sources)
 
     # CLI --days takes precedence over sources.yaml recency_hours_cap.
     recency_cap_hours = args.days * 24
@@ -149,10 +152,6 @@ def main() -> int:
     }
     raw_items = [item for r in fetch_results for item in r["items"]]
 
-    # Build per-tab tweet_feeds pool from the recency-filtered, non-podcast items. This is the
-    # pool that render.py reads to emit the per-tab Tweet Feed section. Built BEFORE truncation
-    # so feed items carry the full tweet text (not the 240-char preview used for synthesis).
-    # Recency filter for tweet feeds matches the news window (not the podcast window).
     podcast_raw = [it for it in raw_items if it["source_id"].startswith("podcast_")]
     non_podcast_raw = [it for it in raw_items if not it["source_id"].startswith("podcast_")]
     news_filtered = _apply_recency_filter(
@@ -161,7 +160,18 @@ def main() -> int:
     podcast_filtered = _apply_recency_filter(
         podcast_raw, completed_at, PODCAST_RECENCY_HOURS, strict=not args.include_undated
     )
-    tweet_feeds = _build_tweet_feeds(news_filtered, feed_routing)
+    # Tweets live in the Worker, fed continuously by the twitterapi.io webhook. Reading them
+    # back costs nothing and yields the deduplicated, retention-pruned set.
+    tweet_feeds, tweet_synthesis_items, tweet_error = _load_tweets_from_worker(recency_cap_hours)
+    if tweet_error:
+        print(f"WARNING: tweets unavailable — {tweet_error}", file=sys.stderr)
+    source_health["twitter_worker"] = {
+        "status": "error" if tweet_error else "ok",
+        "items_fetched": sum(len(v) for k, v in tweet_feeds.items() if k != "rivals")
+                         + sum(len(v) for v in tweet_feeds["rivals"].values()),
+        "latency_ms": 0,
+        "note": tweet_error,
+    }
 
     run_log = {
         "run_id": run_id,
@@ -191,17 +201,11 @@ def main() -> int:
     truncated_news = [_truncate_item(it) for it in news_filtered]
     truncated_podcasts = [_truncate_item(it) for it in podcast_filtered]
     structured_items = [it for it in truncated_news if it["source_id"] in STRUCTURED_SOURCE_IDS]
-    # Strip from synthesis input: (1) feed_only twitter handles (analysts) — they live in
-    # tweet_feeds only; (2) any tweet marked is_retweet — per I/O matrix row 4, pure retweets
-    # must not reach synthesis raw_items. Replies (is_reply) remain in raw_items per matrix
-    # row 5 (existing v1 retweet-attribution rule #8 already handles them at synthesis time).
+    # Articles + the quotable subset of tweets. feed_only handles and pure retweets are
+    # already excluded by _load_tweets_from_worker.
     news_items = [
-        it
-        for it in truncated_news
-        if it["source_id"] not in STRUCTURED_SOURCE_IDS
-        and not feed_routing.get(it["source_id"], {}).get("feed_only")
-        and not it.get("is_retweet")
-    ]
+        it for it in truncated_news if it["source_id"] not in STRUCTURED_SOURCE_IDS
+    ] + tweet_synthesis_items
     podcast_items = truncated_podcasts
 
     # Pointer for reference only — the synthesizing agent reads the prompt per RUNBOOK.md.
@@ -220,7 +224,7 @@ def main() -> int:
         "team_coverage": _team_coverage_meta(config),
         "structured_data": structured_items,
         "podcast_items": podcast_items,
-        "news_items": news_items,  # news + analysis + twitter; minus structured + podcasts + feed_only
+        "news_items": news_items,  # articles + quotable tweets; minus structured, podcasts, feed_only
         "tweet_feeds": tweet_feeds,  # per-tab raw tweet pool for the Tweet Feed UI (verbatim, not synthesized)
         "totals": {
             "raw_in": len(raw_items),
@@ -254,28 +258,6 @@ def main() -> int:
     return 0
 
 
-def _twitter_source(tw, *, src_id, tier, feed_tab_key, twitter_path, twitter_endpoint,
-                     team_code=None):
-    """Build one Twitter source dict. Single definition for the national / primary / rival
-    handle lists so a change to the source shape happens in exactly one place."""
-    src = {
-        "id": src_id,
-        "name": tw.get("name") or tw["handle"],
-        "handle": tw["handle"],
-        "fetch": "twitter",
-        "tier": tier,
-        "twitter_path": twitter_path,
-        "twitter_endpoint": twitter_endpoint,
-        "max_items": tw.get("max_items", 30),
-        "feed": tw.get("feed", True),
-        "feed_only": tw.get("feed_only", False),
-        "feed_tab_key": feed_tab_key,
-    }
-    if team_code is not None:
-        src["team_code"] = team_code
-    return src
-
-
 def _collect_sources(config: dict[str, Any], restrict: list[str] | None = None) -> list[dict[str, Any]]:
     """Flatten sources.yaml into a single list of enabled source dicts."""
     out: list[dict[str, Any]] = []
@@ -288,21 +270,6 @@ def _collect_sources(config: dict[str, Any], restrict: list[str] | None = None) 
             src = dict(src)
             src["tier"] = tier
             out.append(src)
-
-    twitter_path = config.get("twitter_path", "rsshub")
-    twitter_endpoint = config.get("twitter_endpoint", "http://localhost:1200")
-    for tier in ("twitter_news_handles", "twitter_analysis_handles"):
-        for tw in config.get(tier) or []:
-            if not tw.get("enabled", True):
-                continue
-            handle = tw["handle"]
-            tier_short = "news" if tier == "twitter_news_handles" else "analysis"
-            src_id = f"twitter_{tier_short}_{handle}"
-            if restrict and src_id not in restrict:
-                continue
-            out.append(_twitter_source(
-                tw, src_id=src_id, tier=tier, feed_tab_key="national",
-                twitter_path=twitter_path, twitter_endpoint=twitter_endpoint))
 
     # team_coverage: drives the Ravens + Rivals tabs in the digest. Primary's news/twitter
     # sources are emitted with ids like `ravens_news_<slug>` / `ravens_twitter_<handle>` (the
@@ -320,21 +287,8 @@ def _collect_sources(config: dict[str, Any], restrict: list[str] | None = None) 
         src["tier"] = "team_primary_news"
         src["team_code"] = primary.get("team_code")
         out.append(src)
-    for tw in primary.get("twitter_handles") or []:
-        if not tw.get("enabled", True):
-            continue
-        handle = tw["handle"]
-        src_id = f"ravens_twitter_{handle}"
-        if restrict and src_id not in restrict:
-            continue
-        out.append(_twitter_source(
-            tw, src_id=src_id, tier="team_primary_twitter", feed_tab_key="ravens",
-            twitter_path=twitter_path, twitter_endpoint=twitter_endpoint,
-            team_code=primary.get("team_code")))
-
     for rival in team_coverage.get("rivals") or []:
         team_code = rival.get("team_code") or ""
-        team_code_lower = team_code.lower()
         for src in rival.get("news_sources") or []:
             if not src.get("enabled", True):
                 continue
@@ -344,95 +298,85 @@ def _collect_sources(config: dict[str, Any], restrict: list[str] | None = None) 
             src["tier"] = "team_rival_news"
             src["team_code"] = team_code
             out.append(src)
-        for tw in rival.get("twitter_handles") or []:
-            if not tw.get("enabled", True):
-                continue
-            handle = tw["handle"]
-            src_id = f"rival_{team_code_lower}_twitter_{handle}"
-            if restrict and src_id not in restrict:
-                continue
-            out.append(_twitter_source(
-                tw, src_id=src_id, tier="team_rival_twitter",
-                feed_tab_key=f"rivals.{team_code.upper()}",
-                twitter_path=twitter_path, twitter_endpoint=twitter_endpoint,
-                team_code=team_code))
     return out
 
 
-def _build_feed_routing(sources: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Map twitter source_id → per-handle feed routing metadata."""
-    routing: dict[str, dict[str, Any]] = {}
-    for src in sources:
-        if src.get("fetch") != "twitter":
-            continue
-        routing[src["id"]] = {
-            "feed": bool(src.get("feed", True)),
-            "feed_only": bool(src.get("feed_only", False)),
-            "tab_key": src.get("feed_tab_key") or "national",
-            "display_name": src.get("name") or src.get("handle") or src.get("id"),
-        }
-    return routing
+def _load_tweets_from_worker(hours: int) -> tuple[dict[str, Any], list[dict[str, Any]], str | None]:
+    """Read the tweet store back out of the Worker.
 
+    Returns (tweet_feeds, synthesis_items, error). `tweet_feeds` keeps the legacy per-tab shape
+    that publish.py already understands. `synthesis_items` is the subset the digest may quote:
+    feed_only handles (team accounts, analysts kept for browsing) and pure retweets are
+    excluded, matching the pre-Worker behaviour.
 
-def _build_tweet_feeds(
-    items: list[dict[str, Any]], feed_routing: dict[str, dict[str, Any]]
-) -> dict[str, Any]:
-    """Partition recency-filtered twitter items into per-tab feed pools.
-
-    Filters: drop retweets and replies; drop handles with feed=False; dedup by URL within
-    each tab pool. Sorted newest-first by published_at within each pool.
+    A Worker that is unreachable is a warning, not a failure — articles still publish, and the
+    app falls back to whatever tweets the last good feed.json holds.
     """
     feeds: dict[str, Any] = {"national": [], "ravens": [], "rivals": {}}
-    seen_urls: dict[Any, set[str]] = {}
+    worker_url = (os.environ.get("NFL_DAILY_WORKER_URL") or "").rstrip("/")
+    if not worker_url:
+        return feeds, [], "NFL_DAILY_WORKER_URL not set — no tweets in this run"
+
+    try:
+        resp = requests.get(f"{worker_url}/tweets", params={"hours": hours, "limit": 500},
+                            timeout=30)
+        resp.raise_for_status()
+        items = resp.json().get("items") or []
+    except Exception as exc:  # noqa: BLE001
+        return feeds, [], f"{type(exc).__name__}: {exc}"
+
+    feed_only = {h["handle"].lower() for h in _yaml_handles() if h["feed_only"]}
+    primary_code = _primary_code()
+
+    synthesis: list[dict[str, Any]] = []
     for it in items:
-        sid = it.get("source_id", "")
-        routing = feed_routing.get(sid)
-        if not routing or not routing.get("feed"):
-            continue
-        if it.get("is_retweet") or it.get("is_reply"):
-            continue
-        url = (it.get("url") or "").strip()
-        if not url:
-            continue
-        tab = routing["tab_key"] or "national"
-        if tab.startswith("rivals."):
-            code = tab.split(".", 1)[1].upper()
-            if not code:
-                continue  # malformed routing (empty team_code); skip rather than orphan
-            bucket = feeds["rivals"].setdefault(code, [])
-            seen = seen_urls.setdefault(("rivals", code), set())
-        elif tab == "ravens":
-            bucket = feeds["ravens"]
-            seen = seen_urls.setdefault("ravens", set())
+        scope = (it.get("scopes") or ["national"])[0]
+        entry = {
+            "source_id": it.get("source_id"),
+            "author_handle": it.get("author_handle") or "",
+            "author_name": it.get("author_name") or "",
+            "tweet_id": it.get("id") or "",
+            "url": it.get("url") or "",
+            "text": it.get("text") or "",
+            "published_at": it.get("published_at"),
+            "media": it.get("media") or [],
+            "quoted": it.get("quoted"),
+            "is_retweet": bool(it.get("is_retweet")),
+            "is_self_thread": bool(it.get("is_self_thread")),
+            "rt_author": it.get("rt_author"),
+        }
+        if scope == primary_code:
+            feeds["ravens"].append(entry)
+        elif scope == "national":
+            feeds["national"].append(entry)
         else:
-            # 'national' or any unknown tab_key — route to national (defensive default).
-            bucket = feeds["national"]
-            seen = seen_urls.setdefault("national", set())
-        if url in seen:
+            feeds["rivals"].setdefault(scope, []).append(entry)
+
+        if entry["author_handle"].lower() in feed_only or entry["is_retweet"]:
             continue
-        seen.add(url)
-        bucket.append(
-            {
-                "source_id": sid,
-                "author_handle": it.get("author") or "",
-                "author_name": routing.get("display_name") or it.get("author") or "",
-                "tweet_id": it.get("tweet_id") or "",
-                "url": url,
-                "text": it.get("text") or it.get("title") or "",
-                "published_at": it.get("published_at"),
-                "media": it.get("media") or [],
-                "quoted": it.get("quoted"),
-            }
-        )
+        synthesis.append({
+            "source_id": entry["source_id"],
+            "title": _clean_trim(entry["text"], TITLE_MAX_CHARS),
+            "snippet": None,
+            "url": entry["url"],
+            "published_at": entry["published_at"],
+            "author": entry["author_handle"],
+            "scope": scope,
+        })
 
-    def _sort_key(item: dict[str, Any]) -> str:
-        return item.get("published_at") or ""
+    return feeds, synthesis, None
 
-    feeds["national"].sort(key=_sort_key, reverse=True)
-    feeds["ravens"].sort(key=_sort_key, reverse=True)
-    for code in list(feeds["rivals"].keys()):
-        feeds["rivals"][code].sort(key=_sort_key, reverse=True)
-    return feeds
+
+def _yaml_handles() -> list[dict[str, Any]]:
+    """Handle metadata from sources.yaml (shared with pipeline/tweets.py)."""
+    from tweets import load_handles
+    return load_handles()
+
+
+def _primary_code() -> str:
+    with SOURCES_FILE.open() as f:
+        cfg = yaml.safe_load(f)
+    return ((cfg.get("team_coverage") or {}).get("primary") or {}).get("team_code", "BAL")
 
 
 def _team_coverage_meta(config: dict[str, Any]) -> dict[str, Any]:

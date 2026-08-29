@@ -144,6 +144,45 @@ a.card:active { background: var(--surface-2); }
 }
 .card-meta .when { margin-left: auto; color: var(--faint); white-space: nowrap; }
 
+/* Account filter — a scrolling chip rail above the tweet list. Sticks under the masthead so
+   it stays reachable after a long scroll. */
+.chips {
+  display: flex; gap: 6px;
+  overflow-x: auto; scrollbar-width: none;
+  padding: 8px 0 10px;
+  position: sticky; top: 0; z-index: 5;
+  background: var(--bg);
+  -webkit-overflow-scrolling: touch;
+}
+.chips::-webkit-scrollbar { display: none; }
+.chip {
+  flex: 0 0 auto;
+  font-family: var(--body);
+  font-size: 12.5px; font-weight: 500;
+  color: var(--muted);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 11px;
+  cursor: pointer; white-space: nowrap;
+  transition: color .15s, background .15s, border-color .15s;
+}
+.chip.is-active {
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Provenance tags: an RT is someone else's reporting, a thread is a continuation. Both change
+   how the text should be read, so they sit inline with the byline. */
+.tag {
+  font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  border-radius: 4px; padding: 2px 5px;
+  border: 1px solid var(--line); color: var(--faint);
+}
+.tag-rt { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.tag-thread { color: var(--muted); }
+
 .tweet-text { font-size: 15px; line-height: 1.45; white-space: pre-wrap; word-wrap: break-word; }
 .handle { color: var(--faint); font-weight: 400; }
 

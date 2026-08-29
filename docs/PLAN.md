@@ -12,19 +12,22 @@ Personal NFL app for Matt. Replaces (deprecates) the local `nfl-digest` HTML sit
 - **Scope switcher** (top): Ravens / NFL / Steelers (+future rivals). Default scope configurable, ships as Ravens.
 - **Teams:** config-driven from `sources.yaml` `team_coverage` (BAL primary, PIT rival; more rivals addable by config only).
 - **No login** — unguessable URL. **No push notifications** at launch (future add-on).
-- **Freshness:** full pipeline run 2x/day — **noon and 5pm ET**. Track costs, may increase later.
-  (Architecture keeps fetch and synthesis decoupled so fetch-only frequency can be raised cheaply later.)
-- **Pipeline home:** cloud scheduled Claude agent (Anthropic-hosted routine), repo on GitHub. Mac not required.
+- **Freshness:** tweets live (webhook push, ~1 min); articles hourly; digest once daily at 5pm ET.
+- **Pipeline home:** Cloudflare Worker for tweets, GitHub Actions for articles, cloud scheduled
+  Claude agent for the digest. Mac not required for any of it.
 
 ## Architecture
 
 ```
-[cloud scheduled agent, 12pm + 5pm ET]
-  fetch (pipeline/fetchers, from sources.yaml)
-    → synthesize slim digest (Claude, prompts/)
-    → publish.py → web/data/*.json
-    → deploy web/ to static host
-[iPhone PWA] reads web/data/*.json
+[twitterapi.io filter rules]  --push on each tweet-->  [Cloudflare Worker + D1]
+                                                              ^          |
+[GitHub Actions, hourly] --fetch articles--> publish.py -------+          |
+                              → web/data/*.json → deploy to Pages         |
+                                                                          |
+[cloud agent, 5pm ET] --reconcile--> tweets.py --> Worker                 |
+                      --synthesize digest--> publish.py → commit + push    |
+                                                                          v
+[iPhone PWA] reads web/data/*.json (articles, digest) + Worker /tweets (live)
 ```
 
 ## Data contracts (web/data/)
@@ -45,9 +48,8 @@ Personal NFL app for Matt. Replaces (deprecates) the local `nfl-digest` HTML sit
 
 ## Known gaps / future
 
-- Self-threads are dropped: `_build_tweet_feeds` filters all replies, so an analyst's multi-tweet
-  thread shows only its first post. Keeping replies-to-self would recover the rest.
 - Link previews: `cleanTweet` strips t.co stubs, so a tweet linking to an article shows no link.
   `entities.urls[].expanded_url` has the real destination if this is worth rendering.
-- Push notifications — future.
-- Hourly fetch-only refresh — future, cost-gated.
+- The digest's cron is fixed in UTC, so it lands at 5pm ET in summer and 4pm ET in winter.
+- Push notifications — future. The Worker already sees every tweet as it arrives, which is the
+  hard part of a "breaking news" alert.

@@ -1,5 +1,5 @@
 /* NFL Daily service worker — cache shell, network-first for data. */
-const SHELL = "nfl-daily-shell-v7";
+const SHELL = "nfl-daily-shell-v8";
 const SHELL_FILES = ["index.html", "app.css", "app.js", "manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {
@@ -16,8 +16,11 @@ self.addEventListener("activate", (e) => {
 
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
-  if (url.origin !== location.origin) return;
-  if (url.pathname.includes("/data/")) {
+  // Live tweets come from the Worker on another origin. Cache them the same way as /data/ so
+  // the Tweets tab still has something to show on a plane or a dead cell.
+  const isLiveTweets = url.hostname.endsWith(".workers.dev") && url.pathname === "/tweets";
+  if (url.origin !== location.origin && !isLiveTweets) return;
+  if (isLiveTweets || url.pathname.includes("/data/")) {
     // network-first: fresh feed when online, last cached feed when offline
     e.respondWith(
       fetch(e.request).then(res => {

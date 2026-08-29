@@ -1,0 +1,28 @@
+name = "nfl-daily-tweets"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+# Serve on the workers.dev URL, but not on per-version preview URLs: this Worker accepts
+# writes and holds data, so there is no reason to expose additional hostnames for it.
+workers_dev = true
+preview_urls = false
+
+# Nightly prune of tweets past the retention window (see RETENTION_DAYS in src/index.js).
+[triggers]
+crons = ["41 8 * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "nfl-daily-tweets"
+database_id = "14efdd29-da90-44cc-b48f-f1f65fe50ddb"
+
+[vars]
+# Origins allowed to call GET /tweets from a browser. The Pages origin plus localhost for
+# local preview of web/.
+ALLOWED_ORIGINS = "https://maeisen15.github.io,http://localhost:8000"
+
+# Secrets (set with `npx wrangler secret put <NAME>`, never committed):
+#   TWITTERAPI_IO_KEY — twitterapi.io sends this back to us in X-API-Key on every webhook POST,
+#                       which is how /ingest authenticates the sender.
+#   PUSH_SECRET       — bearer token the pipeline uses on POST /push. Independent of the API
+#                       key so a rotation of one doesn't force a rotation of the other.
