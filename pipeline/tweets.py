@@ -43,9 +43,11 @@ SECRETS_FILE = Path(os.path.expanduser(os.environ.get("NFL_DAILY_SECRETS", "~/.n
 
 API_BASE = "https://api.twitterapi.io"
 TIMEOUT = 30
-# Advanced Search pages at 20. A single group rarely exceeds one page at hourly cadence; the
-# cap stops a backfill after an outage from paging forever.
-MAX_PAGES_SEARCH = 15
+# Advanced Search pages at 20. The daily reconciliation covers 26 hours, and a busy in-season
+# day across 17 handles runs past 300 tweets — the cap has to clear that or the sweep silently
+# stops short of the window it claims to cover. It only bounds a runaway backfill; normal cost
+# is set by how many tweets actually exist, not by this number.
+MAX_PAGES_SEARCH = 40
 MAX_PAGES_BACKSTOP = 5
 # Re-ask for a slice we already have. Tweets can surface in the search index out of order, and
 # a few duplicate tweets cost $0.00015 each — far cheaper than a hole in the feed.

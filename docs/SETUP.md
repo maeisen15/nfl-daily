@@ -23,7 +23,7 @@ npx wrangler d1 create nfl-daily-tweets
 ```
 
 It prints a `database_id`. Put that value into `worker/wrangler.toml`, replacing
-`SET_BY_SETUP`. Then create the tables:
+`14efdd29-da90-44cc-b48f-f1f65fe50ddb` (already set). Then create the tables:
 
 ```bash
 npx wrangler d1 execute nfl-daily-tweets --remote --file=schema.sql
@@ -51,10 +51,10 @@ doesn't force rotating the other.
 npx wrangler deploy
 ```
 
-Note the URL it prints, e.g. `https://nfl-daily-tweets.<your-subdomain>.workers.dev`. Check it:
+Note the URL it prints, e.g. `https://nfl-daily-tweets.maeisen15.workers.dev`. Check it:
 
 ```bash
-curl https://nfl-daily-tweets.<your-subdomain>.workers.dev/health
+curl https://nfl-daily-tweets.maeisen15.workers.dev/health
 ```
 
 Expect `{"ok":true,"tweets":0,...}`.
@@ -64,7 +64,7 @@ Expect `{"ok":true,"tweets":0,...}`.
 The webhook URL can only be set in their dashboard — there's no API for it.
 
 1. Go to https://twitterapi.io → Tweet Filter Rules
-2. Paste `https://nfl-daily-tweets.<your-subdomain>.workers.dev/ingest` into **Webhook URL**
+2. Paste `https://nfl-daily-tweets.maeisen15.workers.dev/ingest` into **Webhook URL**
 3. Save
 
 Then create and switch on the rules that decide which handles are watched:
@@ -85,7 +85,7 @@ https://github.com/maeisen15/nfl-daily/settings/secrets/actions and add three:
 
 | Name | Value |
 |---|---|
-| `NFL_DAILY_WORKER_URL` | `https://nfl-daily-tweets.<your-subdomain>.workers.dev` |
+| `NFL_DAILY_WORKER_URL` | `https://nfl-daily-tweets.maeisen15.workers.dev` |
 | `NFL_DAILY_PUSH_SECRET` | the push secret from step 3 |
 | `TWITTERAPI_IO_KEY` | your twitterapi.io key |
 
@@ -104,7 +104,7 @@ While you're there, confirm the network allowlist includes `workers.dev` and
 The webhook only delivers tweets posted *after* the rules go live, so backfill the last day:
 
 ```bash
-export NFL_DAILY_WORKER_URL=https://nfl-daily-tweets.<your-subdomain>.workers.dev
+export NFL_DAILY_WORKER_URL=https://nfl-daily-tweets.maeisen15.workers.dev
 export NFL_DAILY_PUSH_SECRET='<the push secret from step 3>'
 python3 pipeline/tweets.py --mode search --since-hours 24
 ```
@@ -118,7 +118,7 @@ gh workflow run "Hourly refresh"     # or use the Actions tab
 ## Checking it later
 
 ```bash
-curl https://nfl-daily-tweets.<your-subdomain>.workers.dev/health
+curl https://nfl-daily-tweets.maeisen15.workers.dev/health
 ```
 
 `by_source` tells you which path tweets arrived by. A healthy store shows a growing

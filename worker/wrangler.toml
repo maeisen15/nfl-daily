@@ -2,6 +2,11 @@ name = "nfl-daily-tweets"
 main = "src/index.js"
 compatibility_date = "2026-08-01"
 
+# Serve on the workers.dev URL, but not on per-version preview URLs: this Worker accepts
+# writes and holds data, so there is no reason to expose additional hostnames for it.
+workers_dev = true
+preview_urls = false
+
 # Nightly prune of tweets past the retention window (see RETENTION_DAYS in src/index.js).
 [triggers]
 crons = ["41 8 * * *"]
@@ -9,7 +14,7 @@ crons = ["41 8 * * *"]
 [[d1_databases]]
 binding = "DB"
 database_name = "nfl-daily-tweets"
-database_id = "SET_BY_SETUP"
+database_id = "14efdd29-da90-44cc-b48f-f1f65fe50ddb"
 
 [vars]
 # Origins allowed to call GET /tweets from a browser. The Pages origin plus localhost for
