@@ -213,6 +213,11 @@ const POLL_MAX_PAGES = 12;
 const POLL_OVERLAP_SEC = 120;
 // Floor on the watermark, so a long outage can't trigger an unbounded — and expensive — crawl.
 const POLL_MAX_LOOKBACK_H = 26;
+// Advanced Search returns 20 per page, and keeps reporting has_next_page even when the page it
+// just handed back was partial — so trusting that flag alone costs one empty request, billed at
+// the ~26-credit floor, on almost every poll. Measured: it roughly doubled the running cost.
+// A short page means the end of the results.
+const SEARCH_PAGE_SIZE = 20;
 
 /* Waking-hours cadence, in Eastern. Cloudflare crons are UTC-only and cannot express this, so
  * the cron fires every 5 minutes year-round and the gate lives here instead — which also means
@@ -270,6 +275,9 @@ async function poll(env, now) {
         if (tweets.length) written += await upsertAll(env, tweets, "poll");
         cursor = body.next_cursor || "";
         if (!body.has_next_page || !cursor || !tweets.length) break;
+        // The load-bearing one: stop on a partial page rather than paying for the empty page
+        // that has_next_page would otherwise send us to fetch.
+        if (tweets.length < SEARCH_PAGE_SIZE) break;
       }
       if (page >= POLL_MAX_PAGES) truncated = true;
     }
