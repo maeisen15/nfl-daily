@@ -7,9 +7,16 @@ compatibility_date = "2026-08-01"
 workers_dev = true
 preview_urls = false
 
-# Nightly prune of tweets past the retention window (see RETENTION_DAYS in src/index.js).
+# Two schedules. Both strings are mirrored as constants in src/index.js, which routes on
+# event.cron — keep them in sync.
+#
+#   */5   the tweet poll. Fires every 5 minutes year-round because Cloudflare crons are UTC
+#         only and cannot express "waking hours in Eastern"; src/index.js applies the ET
+#         cadence gate and returns immediately outside those hours. A skipped invocation
+#         costs nothing — only the twitterapi.io call does.
+#   41 8  nightly prune of tweets past the retention window (RETENTION_DAYS in src/index.js).
 [triggers]
-crons = ["41 8 * * *"]
+crons = ["*/5 * * * *", "41 8 * * *"]
 
 [[d1_databases]]
 binding = "DB"

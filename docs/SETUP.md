@@ -59,28 +59,29 @@ curl https://nfl-daily-tweets.maeisen15.workers.dev/health
 
 Expect `{"ok":true,"tweets":0,...}`.
 
-## 5. Point twitterapi.io at it
+## 5. Tell the Worker which handles to watch
 
-The webhook URL can only be set in their dashboard — there's no API for it.
-
-1. Go to https://twitterapi.io → Tweet Filter Rules
-2. Paste `https://nfl-daily-tweets.maeisen15.workers.dev/ingest` into **Webhook URL**
-3. Save
-
-Then create and switch on the rules that decide which handles are watched:
+The Worker polls twitterapi.io itself; there is no dashboard step and no webhook URL to set. It
+builds its query from the `handles` table in D1, which the pipeline fills from
+`config/sources.yaml`:
 
 ```bash
 cd /Users/mattscomputer/Coding/nfl-daily
-python3 pipeline/rules.py sync --activate
-python3 pipeline/rules.py list
+export NFL_DAILY_WORKER_URL=https://nfl-daily-tweets.maeisen15.workers.dev
+export NFL_DAILY_PUSH_SECRET='<the push secret from step 3>'
+python3 pipeline/tweets.py --mode sync-handles
 ```
 
-Both rules should read `ACTIVE`. **Billing starts here** — you pay $0.00015 per matched
-tweet, roughly $1.10/month at current volume. `python3 pipeline/rules.py deactivate` stops it.
+**Billing starts at the first poll.** Roughly $1.17/month: ~26 credits per request (140 requests
+a day, on the waking-hours cadence in `worker/src/index.js`) plus 15 credits per tweet returned.
+
+Do **not** run `pipeline/rules.py sync --activate`. That reactivates the retired webhook's filter
+rules, which bill 15 credits per rule per check whether or not anything matches — about
+$12.87/month on top of everything else. The docstring in that file has the full story.
 
 ## 6. Add the GitHub secrets
 
-The hourly refresh and the sweeps need these. Go to
+The hourly refresh needs these. Go to
 https://github.com/maeisen15/nfl-daily/settings/secrets/actions and add three:
 
 | Name | Value |
@@ -101,13 +102,18 @@ While you're there, confirm the network allowlist includes `workers.dev` and
 
 ## 8. Seed the store
 
-The webhook only delivers tweets posted *after* the rules go live, so backfill the last day:
+The poll's watermark starts at the newest tweet already stored, so on an empty store it reaches
+back 26 hours on its own. To seed further back than that, or to pull in a handle you just added
+without waiting for them to post again:
 
 ```bash
 export NFL_DAILY_WORKER_URL=https://nfl-daily-tweets.maeisen15.workers.dev
 export NFL_DAILY_PUSH_SECRET='<the push secret from step 3>'
 python3 pipeline/tweets.py --mode search --since-hours 24
 ```
+
+That is billed per tweet returned, so its price tracks how busy the window was — cheap in the
+offseason, less so on a Sunday.
 
 Then kick the app data over:
 
@@ -121,10 +127,18 @@ gh workflow run "Hourly refresh"     # or use the Actions tab
 curl https://nfl-daily-tweets.maeisen15.workers.dev/health
 ```
 
-`by_source` tells you which path tweets arrived by. A healthy store shows a growing
-`webhook` count; if that number stops moving while `search` keeps climbing, the webhook has
-stopped and the daily sweep is carrying the app — check the rules are still `ACTIVE` and the
-webhook URL is still set in the dashboard.
+`last_poll` is the thing to read. Every poll records what it asked for and what came back,
+because a poll that finds nothing and a poll that quietly broke look identical from outside:
+
+```json
+"last_poll": { "ok": true, "at": "...", "since": "...", "queries": 1,
+               "pages": 1, "returned": 3, "written": 3, "est_credits": 71 }
+```
+
+`ok: false` carries an `error`. `queries` above 1 means the handle list outgrew a single request
+and each poll now costs double the floor. `returned` persistently 0 during busy daytime hours,
+with `ok: true`, is the signature of an over-length query — though the builder splits at 500
+characters specifically to prevent that.
 
 ```bash
 npx wrangler tail          # live Worker logs, from worker/
@@ -136,7 +150,7 @@ npx wrangler tail          # live Worker logs, from worker/
 |---|---|
 | Cloudflare Workers + D1 | $0 (free tier) |
 | GitHub Actions | $0 (unlimited on public repos) |
-| twitterapi.io | ~$2.70/month — live pushes, daily sweep, weekly backstop |
+| twitterapi.io | ~$1.17/month — 140 polls/day plus ~100 tweets/day |
 
 Top up at https://twitterapi.io. Balance is visible via
 `curl -H "X-API-Key: $TWITTERAPI_IO_KEY" https://api.twitterapi.io/oapi/my/info` —

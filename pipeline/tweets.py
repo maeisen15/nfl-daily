@@ -1,27 +1,30 @@
 #!/usr/bin/env python3
-"""Tweet sweeps.
+"""Handle sync and manual tweet backfill.
 
-Tweets no longer ride through the orchestrator's per-source fan-out. They reach the app three
-ways, all landing in the same Cloudflare D1 store keyed by tweet id:
+Routine tweet ingest is not here — the Cloudflare Worker polls for tweets itself on a
+waking-hours cadence (see worker/src/index.js). This script covers the two things that happen
+outside that loop:
 
-  webhook   twitterapi.io pushes each matched tweet to the Worker seconds after it posts.
-            Set up once with `rules.py`; nothing here is involved at runtime.
-  search    `--mode search` — Advanced Search over OR-chained `from:` handles with a
-            `since_time` watermark. Billed per tweet *returned*, so checking often is nearly
-            free. Reconciles anything the webhook dropped and backfills the rich fields
-            (media, quoted posts) a thin webhook payload may omit.
-  backstop  `--mode backstop` — the old per-handle `last_tweets` endpoint, paginated. Billed
-            a full 20-tweet page per handle, so this runs once a day. It is the safety net for
-            the one thing search can't guarantee: Twitter's search index occasionally lags or
-            drops a post.
+  sync-handles  Push the handle -> scope map from sources.yaml into the Worker's D1. The
+                poller builds its query from that table, so this is the step that actually
+                puts a new handle on the air. Costs nothing; touches no tweet API.
+  search        Manual Advanced Search backfill over a window you choose. Useful right after
+                adding a handle, to pull their recent tweets in rather than waiting for them
+                to post again.
 
-Raw tweet objects are POSTed to the Worker as-is; normalization lives there so the webhook and
-these sweeps can't drift apart.
+A note on cost, because a wrong assumption here is what made this app expensive once already.
+Measured directly against the billing endpoint (100,000 credits = $1.00):
+
+    a search returning 0 tweets    ~26 credits, flat, per request
+    a search returning 20 tweets    300 credits, i.e. 15 credits per tweet returned
+
+So a backfill's price is set by how many tweets are in the window, not by how wide the window
+is. `--since-hours 48` over a quiet stretch is cheap; the same flag mid-season is not.
 
 Usage:
-    python3 pipeline/tweets.py --mode search              # reconcile since the watermark
-    python3 pipeline/tweets.py --mode backstop            # full per-handle sweep
-    python3 pipeline/tweets.py --mode search --dry-run    # fetch, report, push nothing
+    python3 pipeline/tweets.py --mode sync-handles          # after editing sources.yaml
+    python3 pipeline/tweets.py --mode search --since-hours 6
+    python3 pipeline/tweets.py --mode search --dry-run      # fetch, report, push nothing
 """
 from __future__ import annotations
 
@@ -48,25 +51,27 @@ TIMEOUT = 30
 # stops short of the window it claims to cover. It only bounds a runaway backfill; normal cost
 # is set by how many tweets actually exist, not by this number.
 MAX_PAGES_SEARCH = 40
-MAX_PAGES_BACKSTOP = 5
 # Re-ask for a slice we already have. Tweets can surface in the search index out of order, and
 # a few duplicate tweets cost $0.00015 each — far cheaper than a hole in the feed.
 WATERMARK_OVERLAP_MIN = 20
-# Conservative ceiling for one Advanced Search query. Tested comfortably at 217 chars.
-MAX_QUERY_CHARS = 450
+# Ceiling for one Advanced Search query. Measured: a 506-char query returns tweets, a 528-char
+# one returns zero — with no error and no message, indistinguishable from a quiet news day. The
+# real cliff is almost certainly 512. Split well short of it; a silent empty feed is the worst
+# failure this system has.
+MAX_QUERY_CHARS = 500
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="NFL Daily tweet sweeps")
-    ap.add_argument("--mode", choices=("search", "backstop"), default="search")
+    ap = argparse.ArgumentParser(description="NFL Daily handle sync and manual backfill")
+    ap.add_argument("--mode", choices=("sync-handles", "search"), default="sync-handles")
     ap.add_argument("--since-hours", type=float, default=None,
-                    help="Override the watermark and look back this many hours.")
+                    help="Backfill window for --mode search. Defaults to the store watermark.")
     ap.add_argument("--dry-run", action="store_true", help="Fetch and report; push nothing.")
     ap.add_argument("--dump", help="Also write the raw tweets to this JSON path.")
     args = ap.parse_args()
 
     api_key = load_secret("TWITTERAPI_IO_KEY")
-    if not api_key:
+    if not api_key and args.mode != "sync-handles":
         print("ERROR: TWITTERAPI_IO_KEY not set (env or ~/.nfl-digest/secrets.env)", file=sys.stderr)
         return 1
     worker_url = (os.environ.get("NFL_DAILY_WORKER_URL") or "").rstrip("/")
@@ -84,15 +89,24 @@ def main() -> int:
     print(f"{len(handles)} handles across scopes: "
           f"{sorted({h['scope'] for h in handles})}", file=sys.stderr)
 
+    # Handle sync is the common case and costs nothing, so it gets its own short path: push
+    # the routing table and stop, without touching the tweet API at all.
+    if args.mode == "sync-handles":
+        if args.dry_run:
+            for h in handles:
+                print(f"  {h['scope']:>8}  {h['handle']}", file=sys.stderr)
+            return 0
+        result = push(worker_url, push_secret, [], handles, "sync-handles")
+        print(f"synced {len(handles)} handles: {json.dumps(result)}", file=sys.stderr)
+        _warn_if_query_splits(handles)
+        return 0
+
     started = time.monotonic()
-    if args.mode == "search":
-        since = resolve_since(worker_url, args.since_hours)
-        print(f"search watermark: {since.isoformat()} "
-              f"({(datetime.now(timezone.utc) - since).total_seconds() / 3600:.1f}h back)",
-              file=sys.stderr)
-        tweets = sweep_search(api_key, handles, since)
-    else:
-        tweets = sweep_backstop(api_key, handles)
+    since = resolve_since(worker_url, args.since_hours)
+    print(f"search watermark: {since.isoformat()} "
+          f"({(datetime.now(timezone.utc) - since).total_seconds() / 3600:.1f}h back)",
+          file=sys.stderr)
+    tweets = sweep_search(api_key, handles, since)
 
     unique = dedupe(tweets)
     elapsed = time.monotonic() - started
@@ -220,37 +234,15 @@ def sweep_search(api_key: str, handles: list[dict[str, Any]], since: datetime) -
     return out
 
 
-def sweep_backstop(api_key: str, handles: list[dict[str, Any]]) -> list[dict]:
-    """Per-handle `last_tweets`, paginated back through the retention window. Expensive by
-    design (a full page is billed whether or not it's new) — this is the completeness check,
-    not the freshness path."""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=48)
-    out: list[dict] = []
-    for h in handles:
-        page, cursor, got = 0, "", 0
-        while page < MAX_PAGES_BACKSTOP:
-            params = {"userName": h["handle"], "includeReplies": "true"}
-            if cursor:
-                params["cursor"] = cursor
-            try:
-                body = api_get(api_key, "/twitter/user/last_tweets", params)
-            except Exception as exc:  # noqa: BLE001
-                print(f"  {h['handle']}: ERROR {exc}", file=sys.stderr)
-                break
-            payload = body.get("data") or body
-            tweets = payload.get("tweets") or []
-            out.extend(tweets)
-            got += len(tweets)
-            page += 1
-            cursor = payload.get("next_cursor") or body.get("next_cursor") or ""
-            oldest = min((parse_twitter_date(t.get("createdAt")) for t in tweets
-                          if t.get("createdAt")), default=None)
-            has_next = payload.get("has_next_page", body.get("has_next_page"))
-            # Stop as soon as the page reaches past the retention window.
-            if not tweets or not has_next or not cursor or (oldest and oldest < cutoff):
-                break
-        print(f"  {h['handle']}: {got} tweets over {page} page(s)", file=sys.stderr)
-    return out
+def _warn_if_query_splits(handles: list[dict[str, Any]]) -> None:
+    """One request covers every handle for the same ~26-credit floor, so the poll gets more
+    expensive in a step, not a slope: it costs the same until the handle list no longer fits in
+    one query, then doubles. Worth saying out loud at the moment someone crosses that line."""
+    n = len(build_queries(handles, datetime.now(timezone.utc)))
+    if n > 1:
+        print(f"note: {len(handles)} handles no longer fit one query — the Worker will send {n} "
+              f"requests per poll instead of 1 (about +${(n - 1) * 1.09:.2f}/month).",
+              file=sys.stderr)
 
 
 def dedupe(tweets: list[dict]) -> list[dict]:

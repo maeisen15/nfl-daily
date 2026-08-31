@@ -12,7 +12,8 @@ Personal NFL app for Matt. Replaces (deprecates) the local `nfl-digest` HTML sit
 - **Scope switcher** (top): Ravens / NFL / Steelers (+future rivals). Default scope configurable, ships as Ravens.
 - **Teams:** config-driven from `sources.yaml` `team_coverage` (BAL primary, PIT rival; more rivals addable by config only).
 - **No login** — unguessable URL. **No push notifications** at launch (future add-on).
-- **Freshness:** tweets live (webhook push, ~1 min); articles hourly; digest once daily at 5pm ET.
+- **Freshness:** tweets polled every 5 min through the day (15 min in the shoulders, dark
+  overnight); articles hourly; digest once daily at 5pm ET.
 - **Pipeline home:** Cloudflare Worker for tweets, GitHub Actions for articles, cloud scheduled
   Claude agent for the digest. Mac not required for any of it.
 

@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
 """Manage the twitterapi.io tweet filter rules that drive the live webhook.
 
+DORMANT — and expensive to wake. These rules are deactivated and the app no longer uses the
+webhook; the Cloudflare Worker polls Advanced Search instead (worker/src/index.js).
+
+Read this before running `sync --activate`. A filter rule is billed 15 credits every time it is
+checked, whether or not anything matches. Measured on an idle account: two rules at a 60-second
+interval burn 43,200 credits/day — about $12.87/month to be told "nothing new" 2,880 times a
+day. That single line was roughly two thirds of this app's bill. The 255-character cap on a
+rule's `value` also means 17 handles need two rules, so the meter runs twice per check.
+
+Polling Advanced Search has no such cap: one request covers every handle for one ~26-credit
+floor. That is why the webhook was retired, and it is why activating these rules again should
+be a deliberate decision rather than a reflex.
+
 A rule is an OR-chained `from:` query. When a matching tweet posts, twitterapi.io POSTs it to
 the webhook URL configured for the account, which is the Worker's /ingest. Billing is per
 matched tweet, so the rules are the only real cost lever — keep them tight.

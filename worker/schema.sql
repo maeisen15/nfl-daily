@@ -35,3 +35,12 @@ CREATE TABLE IF NOT EXISTS handles (
   feed_only    INTEGER NOT NULL DEFAULT 0,
   updated_at   TEXT NOT NULL
 );
+
+-- Small key/value scratch for the poller. Its purpose is diagnostic: a poll that returns
+-- nothing looks identical to a poll that silently broke, so every run records what it asked
+-- for and what came back, and /health surfaces the last one.
+CREATE TABLE IF NOT EXISTS meta (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,           -- JSON
+  updated_at TEXT NOT NULL
+);

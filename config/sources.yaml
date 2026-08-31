@@ -159,14 +159,17 @@ podcasts:
     enabled: true
 
 # ---- Twitter ------------------------------------------------------------------------------
-# Tweets do NOT flow through the orchestrator. twitterapi.io watches these handles and pushes
-# each new tweet to the Cloudflare Worker (worker/) within about a minute; the app reads them
-# from there. Two sweeps in .github/workflows/tweets-sweep.yml backfill anything that path
-# misses. See docs/SETUP.md.
+# Tweets do NOT flow through the orchestrator. The Cloudflare Worker (worker/) polls
+# twitterapi.io for these handles on a waking-hours cadence and stores what it finds; the app
+# reads them from there. See docs/SETUP.md.
 #
 # This list is the single source of truth for who is watched. After editing it:
-#   python3 pipeline/rules.py sync --activate     # update the twitterapi.io filter rules
-# The handle -> scope map is pushed to the Worker automatically on the next sweep.
+#   python3 pipeline/tweets.py --mode sync-handles
+# The Worker builds its poll query from that table, so editing this file alone does nothing.
+#
+# One request covers every handle, so handles are close to free until the query no longer fits
+# in one: 21 fit, and the 22nd adds a second request per poll (~+$1.09/month). The sync command
+# says so when you cross that line.
 #
 # Per-handle flags:
 #   feed:      true → tweets appear in the app's Tweets tab (default: true)

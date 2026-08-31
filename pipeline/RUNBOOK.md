@@ -8,13 +8,14 @@ Everything else already happens without you:
 
 | What | How | When |
 |---|---|---|
-| Tweets | twitterapi.io webhook → Cloudflare Worker | continuously, ~1 min after posting |
+| Tweets | the Cloudflare Worker polls twitterapi.io itself | every 5 min, 9am–7pm ET |
 | Articles, transactions, injuries | GitHub Actions `refresh.yml` | hourly |
-| Tweet completeness sweeps | GitHub Actions `tweets-sweep.yml` | daily + weekly |
 | **The digest** | **you** | **now** |
 
 So do not treat a stale article or a missing tweet as your problem to fix — say so at the end
-and let the hourly job handle it. Your run is also the only one that commits, which is how
+and let the hourly job handle it. In particular, do not run a tweet sweep to "catch up" before
+writing: the Worker is already polling, and an extra Advanced Search over the day's window is
+billed per tweet it returns. Write the digest against whatever the Worker holds. Your run is also the only one that commits, which is how
 `web/data` in the repo stays in sync with what's live.
 
 Work from the repo root.
@@ -33,18 +34,7 @@ pip install setuptools wheel && pip install -r pipeline/requirements.txt
 pip install --no-build-isolation sgmllib3k && pip install -r pipeline/requirements.txt
 ```
 
-## 2. Reconcile tweets
-
-```bash
-python3 pipeline/tweets.py --mode search --since-hours 26
-```
-
-Pulls anything the webhook missed into the Worker so the digest is written against a complete
-day. Requires `TWITTERAPI_IO_KEY`, `NFL_DAILY_WORKER_URL`, and `NFL_DAILY_PUSH_SECRET`. If it
-fails, continue — the digest will simply be written from whatever the Worker already holds.
-Note it in the commit message.
-
-## 3. Fetch
+## 2. Fetch
 
 ```bash
 mkdir -p runtime
@@ -60,7 +50,7 @@ would go blank. Stop and leave the repo untouched.
 A `twitter_worker` entry in `error` means no tweets reached this run. That is worth reporting
 but is not a reason to abort: the digest still has articles and structured data.
 
-## 4. Synthesize the digest
+## 3. Synthesize the digest
 
 Read `runtime/package.json` (keys: `team_coverage`, `structured_data`, `news_items`,
 `source_health`, `run_log_path`, `prompt_path`). Then read `prompts/digest.md` — the single,
@@ -87,7 +77,7 @@ Write the result back into the run log at `run_log_path` (open the JSON, set the
 
 One `rivals.<code>` entry per rival in `team_coverage.rivals`.
 
-## 5. Publish app JSON
+## 4. Publish app JSON
 
 ```bash
 python3 pipeline/publish.py
@@ -105,7 +95,7 @@ degraded — zero items, or more than half of sources errored. This protects the
 broken run keeps the last good data. If it refuses, do NOT commit — stop and report the reason.
 Only pass `--force` if you have confirmed the empty result is a genuinely quiet news day.
 
-## 6. Ship
+## 5. Ship
 
 Only if publish.py succeeded (exit 0):
 
@@ -117,7 +107,7 @@ git push origin main
 
 Push directly to main — no PR. The Pages workflow deploys automatically (~1 min).
 
-## 7. Verify the deploy landed
+## 6. Verify the deploy landed
 
 A successful push is not a successful deploy. Always finish with:
 

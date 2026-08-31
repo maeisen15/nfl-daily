@@ -1,21 +1,31 @@
 /* NFL Daily tweet store.
  *
- * Tweets reach the app two ways and both land in the same D1 table, keyed by tweet id:
+ * This Worker both fetches tweets and serves them.
  *
- *   twitterapi.io webhook  -> POST /ingest   (seconds after the tweet, may be a thin payload)
- *   pipeline sweep         -> POST /push     (hourly + daily, always full tweet objects)
+ *   scheduled()  -> polls twitterapi.io Advanced Search on a waking-hours cadence and writes
+ *                   what it finds. This is the ingest path.
+ *   POST /push   -> the pipeline pushes handle->scope routing here (and may push tweets).
+ *   POST /ingest -> dormant. The twitterapi.io webhook used to deliver here; its filter rules
+ *                   are deactivated. See the cost note on the poll section below before
+ *                   turning them back on.
+ *   GET  /tweets -> what the PWA reads.
  *
- * The webhook gives immediacy; the sweep gives completeness and the rich fields (media,
- * quoted posts) that a thin webhook payload may omit. `richness` decides upsert conflicts so
- * the fuller record always wins regardless of arrival order.
+ * Everything lands in the same D1 table keyed by tweet id, so the paths can overlap freely;
+ * `richness` decides upsert conflicts and the fuller record always wins.
  *
- * The PWA reads GET /tweets. Handle -> scope routing lives in D1, synced from sources.yaml by
- * the pipeline, so adding a handle never requires redeploying this Worker.
+ * Handle -> scope routing lives in D1, synced from sources.yaml by the pipeline, so adding a
+ * handle never requires redeploying this Worker.
  */
 
 const RETENTION_DAYS = 7;
 const MAX_LIMIT = 500;
 const DEFAULT_HOURS = 48;
+
+// Cron strings, mirrored from wrangler.toml. scheduled() routes on these.
+const CRON_POLL  = "*/5 * * * *";
+const CRON_PRUNE = "41 8 * * *";
+
+const TWITTERAPI_BASE = "https://api.twitterapi.io";
 
 export default {
   async fetch(request, env) {
@@ -40,13 +50,22 @@ export default {
     }
   },
 
-  // Prune on a schedule rather than on every write, so an ingest burst stays cheap.
   async scheduled(event, env) {
-    const cutoff = isoDaysAgo(RETENTION_DAYS);
-    const res = await env.DB.prepare("DELETE FROM tweets WHERE published_at < ?").bind(cutoff).run();
-    console.log(`pruned ${res.meta?.changes ?? 0} tweets older than ${cutoff}`);
+    if (event.cron === CRON_PRUNE) return await prune(env);
+    // Default to the poll: an unrecognised cron is likelier a wrangler.toml edit than a prune,
+    // and skipping ingest is a worse failure than pruning twice.
+    return await poll(env, new Date());
   },
 };
+
+/* ---------- prune ---------- */
+
+// On a schedule rather than on every write, so an ingest burst stays cheap.
+async function prune(env) {
+  const cutoff = isoDaysAgo(RETENTION_DAYS);
+  const res = await env.DB.prepare("DELETE FROM tweets WHERE published_at < ?").bind(cutoff).run();
+  console.log(`pruned ${res.meta?.changes ?? 0} tweets older than ${cutoff}`);
+}
 
 /* ---------- write paths ---------- */
 
@@ -79,7 +98,9 @@ async function push(request, env) {
   if (Array.isArray(body.handles)) handlesSynced = await syncHandles(env, body.handles);
 
   const raw = Array.isArray(body.tweets) ? body.tweets : [];
-  const source = body.source === "backstop" ? "backstop" : "search";
+  // The only writer that still pushes tweets here is the manual backfill in tweets.py; routine
+  // ingest is the Worker's own poll. A sync-handles call carries no tweets at all.
+  const source = "search";
   const written = await upsertAll(env, raw, source);
   return json({ ok: true, received: raw.length, written, handles_synced: handlesSynced }, 200, env, "");
 }
@@ -155,6 +176,187 @@ async function upsertAll(env, rawTweets, source) {
   return stmts.length;
 }
 
+/* ---------- poll: the ingest path ---------- */
+
+/* Cost model, measured directly against the billing endpoint rather than taken from the docs
+ * (100,000 credits = $1.00):
+ *
+ *   a search returning 0 tweets   ~26 credits   flat, per request
+ *   a search returning 20 tweets   300 credits   i.e. 15 credits per tweet returned
+ *
+ * Two things follow, and they drive every decision in this section.
+ *
+ * First, tweets are billed once each on delivery, so `since_time` is not an optimisation —
+ * it is the whole cost control. A poll without it re-returns the same 20 tweets every time
+ * and bills 15 credits for each of them, every five minutes. Never widen the watermark
+ * casually.
+ *
+ * Second, the per-request floor is what multiplies, not the handle count: one request covers
+ * every handle for the same ~26 credits. So the cheapest arrangement is one query at the
+ * fastest cadence any handle needs — splitting the feed into fast and slow tiers would mean
+ * asking more often in total and paying the floor more times, for slower tweets. Don't tier.
+ *
+ * For reference, the filter-rule webhook this replaced billed 15 credits per rule per check
+ * whether or not anything matched: 43,200 credits/day, ~$12.87/month of empty polling. The
+ * rules in pipeline/rules.py are deactivated. Reactivating them re-arms that meter.
+ */
+
+// The API silently returns zero tweets — no error, no message — once a query passes roughly
+// 512 characters. That failure is indistinguishable from a quiet news day, so the builder
+// splits well short of the cliff and never emits a query that could trip it.
+const POLL_QUERY_CHARS = 500;
+// Bounds a backfill after a long gap; 12 pages x 20 tweets = 240. Each page costs, so this is
+// a spend ceiling as much as a loop guard.
+const POLL_MAX_PAGES = 12;
+// Re-ask for a sliver we already hold. The search index can surface posts out of order, and a
+// handful of duplicate tweets is far cheaper than a hole in the feed.
+const POLL_OVERLAP_SEC = 120;
+// Floor on the watermark, so a long outage can't trigger an unbounded — and expensive — crawl.
+const POLL_MAX_LOOKBACK_H = 26;
+
+/* Waking-hours cadence, in Eastern. Cloudflare crons are UTC-only and cannot express this, so
+ * the cron fires every 5 minutes year-round and the gate lives here instead — which also means
+ * the schedule stays correct across DST with no wrangler.toml edit. A gated-out invocation
+ * makes no API call and costs nothing.
+ *
+ * Overnight is dark on purpose: nothing is lost, because the 8am poll's watermark reaches back
+ * to the last tweet stored and pulls the whole night in one request. */
+function pollCadenceMinutes(hourET) {
+  if (hourET >= 9 && hourET < 19) return 5;                      // 9am–7pm, the hours that matter
+  if (hourET === 8 || (hourET >= 19 && hourET < 23)) return 15;  // 8–9am and 7–11pm, shoulders
+  return 0;                                                       // 11pm–8am, dark
+}
+
+function easternParts(date) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York", hour12: false, hour: "2-digit", minute: "2-digit",
+    }).formatToParts(date).map(p => [p.type, p.value])
+  );
+  return { hour: Number(parts.hour) % 24, minute: Number(parts.minute) };
+}
+
+async function poll(env, now) {
+  const { hour, minute } = easternParts(now);
+  const cadence = pollCadenceMinutes(hour);
+  if (cadence === 0) return;
+  // The cron ticks every 5 minutes; a 15-minute cadence uses every third tick.
+  if (minute % cadence !== 0) return;
+
+  if (!env.TWITTERAPI_IO_KEY) {
+    return await recordPoll(env, now, { ok: false, error: "TWITTERAPI_IO_KEY not set" });
+  }
+
+  const rows = await env.DB.prepare("SELECT handle FROM handles ORDER BY handle").all();
+  const handles = (rows.results || []).map(r => r.handle).filter(Boolean);
+  if (!handles.length) {
+    // The handles table is synced by the pipeline; empty means that sync never ran, and
+    // polling with no handles would just burn the per-request floor for nothing.
+    return await recordPoll(env, now, { ok: false, error: "no handles in D1 — run tweets.py --mode sync-handles" });
+  }
+
+  const since = await pollWatermark(env, now);
+  const queries = buildPollQueries(handles, since);
+
+  let returned = 0, pages = 0, written = 0, truncated = false;
+  try {
+    for (const query of queries) {
+      let cursor = "", page = 0;
+      while (page < POLL_MAX_PAGES) {
+        const body = await searchPage(env, query, cursor);
+        const tweets = Array.isArray(body.tweets) ? body.tweets : [];
+        returned += tweets.length;
+        page += 1; pages += 1;
+        if (tweets.length) written += await upsertAll(env, tweets, "poll");
+        cursor = body.next_cursor || "";
+        if (!body.has_next_page || !cursor || !tweets.length) break;
+      }
+      if (page >= POLL_MAX_PAGES) truncated = true;
+    }
+  } catch (err) {
+    console.error("poll failed", err && err.stack ? err.stack : String(err));
+    return await recordPoll(env, now, {
+      ok: false, error: String(err && err.message ? err.message : err),
+      since: since.toISOString(), queries: queries.length, returned, written,
+    });
+  }
+
+  if (truncated) console.warn(`poll hit the ${POLL_MAX_PAGES}-page cap; window not fully covered`);
+  console.log(`poll: ${handles.length} handles, ${queries.length} query(s), ${pages} page(s), ` +
+              `${returned} returned, ${written} written, since ${since.toISOString()}`);
+
+  await recordPoll(env, now, {
+    ok: true, cadence_minutes: cadence, since: since.toISOString(),
+    handles: handles.length, queries: queries.length, pages,
+    returned, written, truncated,
+    // ~26 credits per request plus 15 per tweet returned; useful for spotting a cost regression.
+    est_credits: pages * 26 + returned * 15,
+  });
+}
+
+/* Where to resume from: the newest tweet already stored, less a small overlap. Keeping the
+ * watermark in the store rather than in a counter means a missed run self-heals — the next
+ * poll simply asks for a wider window — and a restored Worker resumes exactly where it left
+ * off. Floored so it can never become an unbounded crawl. */
+async function pollWatermark(env, now) {
+  const floor = new Date(now.getTime() - POLL_MAX_LOOKBACK_H * 3600_000);
+  const row = await env.DB.prepare("SELECT MAX(published_at) AS newest FROM tweets").first();
+  if (!row || !row.newest) return floor;
+  const newest = new Date(row.newest);
+  if (isNaN(newest)) return floor;
+  const since = new Date(newest.getTime() - POLL_OVERLAP_SEC * 1000);
+  return since < floor ? floor : since;
+}
+
+/* Pack handles into as few queries as the length budget allows. Grouping is purely by length,
+ * never by scope: the Worker routes on the author's handle, so a query may freely span tabs,
+ * and fewer queries means the per-request floor is paid fewer times. */
+function buildPollQueries(handles, since) {
+  const suffix = ` include:nativeretweets since_time:${Math.floor(since.getTime() / 1000)}`;
+  const budget = POLL_QUERY_CHARS - suffix.length - 2;  // the wrapping parens
+  const queries = [];
+  let group = [], length = 0;
+  for (const handle of handles) {
+    const term = `from:${handle}`;
+    // A single handle wider than the whole budget can't be expressed; dropping it is bad, but
+    // emitting an over-length query that silently returns nothing for *every* handle is worse.
+    if (term.length > budget) {
+      console.warn(`poll: handle ${handle} too long for a query budget of ${budget}; skipped`);
+      continue;
+    }
+    const addition = group.length ? term.length + 4 : term.length;  // " OR "
+    if (group.length && length + addition > budget) {
+      queries.push(`(${group.join(" OR ")})${suffix}`);
+      group = []; length = 0;
+    }
+    group.push(term);
+    length += group.length === 1 ? term.length : term.length + 4;
+  }
+  if (group.length) queries.push(`(${group.join(" OR ")})${suffix}`);
+  return queries;
+}
+
+async function searchPage(env, query, cursor) {
+  const url = new URL(`${TWITTERAPI_BASE}/twitter/tweet/advanced_search`);
+  url.searchParams.set("query", query);
+  url.searchParams.set("queryType", "Latest");
+  if (cursor) url.searchParams.set("cursor", cursor);
+  const res = await fetch(url.toString(), { headers: { "X-API-Key": env.TWITTERAPI_IO_KEY } });
+  if (!res.ok) throw new Error(`advanced_search returned ${res.status}`);
+  return await res.json();
+}
+
+// A poll that finds nothing and a poll that quietly broke look identical from the outside, so
+// every run leaves a record and /health reports the last one.
+async function recordPoll(env, now, detail) {
+  if (!detail.ok) console.error("poll not ok:", JSON.stringify(detail));
+  const value = JSON.stringify({ at: now.toISOString(), ...detail });
+  await env.DB.prepare(
+    `INSERT INTO meta (key, value, updated_at) VALUES ('last_poll', ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).bind(value, now.toISOString()).run();
+}
+
 /* ---------- read path ---------- */
 
 async function getTweets(request, env, url, origin) {
@@ -213,6 +415,7 @@ async function health(env, origin) {
     "SELECT source, COUNT(*) AS n FROM tweets GROUP BY source"
   ).all();
   const handles = await env.DB.prepare("SELECT COUNT(*) AS n FROM handles").first();
+  const lastPoll = await env.DB.prepare("SELECT value FROM meta WHERE key = 'last_poll'").first();
   return json({
     ok: true,
     tweets: row?.n ?? 0,
@@ -221,6 +424,8 @@ async function health(env, origin) {
     last_ingest_at: row?.last_ingest ?? null,
     by_source: Object.fromEntries((bySource.results || []).map(r => [r.source, r.n])),
     retention_days: RETENTION_DAYS,
+    // The ingest path's own report card — see recordPoll().
+    last_poll: safeParse(lastPoll?.value, null),
   }, 200, env, origin);
 }
 
