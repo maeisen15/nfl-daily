@@ -1,13 +1,13 @@
 /* The tweet feed: the app's front page.
  *
  * Chronological, newest first, seven days deep. Threads collapse into one item so a six-tweet
- * thread never eats the screen, and new tweets are held behind a pill rather than inserted
- * under a thumb mid-read.
+ * thread never eats the screen, and new tweets are folded in when the feed is back at the
+ * top rather than inserted under a thumb mid-read.
  */
 
 import { el, frag } from "../lib/dom.js";
 import { dayLabel } from "../lib/time.js";
-import { store, set, tweetsForScope, pendingForScope, mergeTweets } from "../store.js";
+import { store, set, tweetsForScope, mergeTweets } from "../store.js";
 import { tweetRow, hydrateClamps } from "./tweet.js";
 import { go } from "../router.js";
 import { fetchTweets } from "../data.js";

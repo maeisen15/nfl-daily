@@ -48,10 +48,6 @@ export function tweetsForScope(scope) {
   return store.tweets.filter(t => (t.scopes || []).includes(scope));
 }
 
-export function pendingForScope(scope) {
-  return store.pending.filter(t => (t.scopes || []).includes(scope));
-}
-
 export function findTweet(id) {
   return store.tweets.find(t => t.id === id)
       || store.pending.find(t => t.id === id)

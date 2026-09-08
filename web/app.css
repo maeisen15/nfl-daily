@@ -310,6 +310,13 @@ main {
 .media-item { position: relative; background: var(--bg-sunken); }
 .media-item img, .media-item video { width: 100%; height: 100%; object-fit: cover; }
 .media.count-1 .media-item img { max-height: 62vh; height: auto; object-fit: contain; }
+
+/* A lone photo or player whose proportions the Worker recorded gets its box reserved inline,
+   before the file has loaded. Nothing below it moves when the content finally arrives. */
+.media-item.boxed { background: #000; }
+.media-item.boxed img, .media-item.boxed video {
+  width: 100%; height: 100%; max-height: none; object-fit: contain;
+}
 .media.count-2 .media-item, .media.count-3 .media-item, .media.count-4 .media-item { aspect-ratio: 1; }
 .media.count-3 .media-item:first-child { aspect-ratio: 1 / 2.01; }
 
@@ -397,6 +404,11 @@ main {
 .link-card.compact img { height: 100%; aspect-ratio: auto; }
 .link-card.compact .link-card-body { padding: 8px 12px; align-self: center; }
 
+/* No image to show — a paywall, a bot wall, a page with no Open Graph tags. The card is the
+   domain and the destination, which is all it needs to be to stay tappable. */
+.link-card.bare .link-card-body { padding: 10px 12px; }
+.link-card.bare .link-card-title { color: var(--muted); font-weight: 500; }
+
 /* ---------- engagement row ---------- */
 
 .actions {
@@ -440,21 +452,6 @@ main {
   color: var(--muted);
   background: var(--bg);
   border-bottom: 1px solid var(--line);
-}
-
-.new-pill {
-  position: fixed;
-  top: calc(var(--sat) + 94px);
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 15;
-  padding: 8px 16px;
-  border-radius: 999px;
-  background: var(--accent);
-  color: var(--accent-contrast);
-  font-size: 14px;
-  font-weight: 700;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, .22);
 }
 
 .spinner {

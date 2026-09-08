@@ -785,9 +785,11 @@ async function fetchOpenGraph(url) {
       redirect: "follow",
       signal: AbortSignal.timeout(LINK_FETCH_TIMEOUT_MS),
       headers: {
-        // Publishers serve Open Graph tags to crawlers they recognise; an unidentified client
-        // gets a bot wall from some of them.
-        "User-Agent": "Mozilla/5.0 (compatible; NFLDailyBot/1.0; +https://maeisen15.github.io/nfl-daily/)",
+        // A self-identifying bot string is turned away by a quarter of the publishers linked
+        // here — Substack and the Advance papers both answer it with a 403, so the tweet loses
+        // its card. This is one request per URL, ever, for the page a tap would open anyway.
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
+                      "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml",
       },
       cf: { cacheTtl: 3600, cacheEverything: true },
@@ -1165,12 +1167,41 @@ function extractMedia(raw) {
     if (type === "video" || type === "animated_gif") {
       const vurl = pickMp4(m);
       if (!vurl) continue;
-      out.push({ type, url: poster, video_url: vurl, loop: type === "animated_gif" });
+      out.push({ type, url: poster, video_url: vurl, loop: type === "animated_gif", ...shape(m, vurl) });
     } else if (poster) {
-      out.push({ type, url: poster });
+      out.push({ type, url: poster, ...shape(m, poster) });
     }
   }
   return out;
+}
+
+/* The shape of the media, so the app can reserve its box before anything downloads. Without it
+ * a player is 2:1 until its poster arrives and then jumps to the real proportions, which moves
+ * every tweet below it — under a thumb that was already reaching for one of them.
+ *
+ * Twitter reports the size three different ways depending on which endpoint answered, and the
+ * mp4's own path carries it when none of them do. */
+function shape(m, url) {
+  const vi = m.video_info || m.videoInfo || {};
+  const ratio = vi.aspect_ratio || vi.aspectRatio || [];
+  const original = m.original_info || m.originalInfo || {};
+  const large = (m.sizes && (m.sizes.large || m.sizes.medium)) || {};
+  const candidates = [
+    [ratio[0], ratio[1]],
+    [original.width, original.height],
+    [large.w, large.h],
+    dimsFromUrl(url),
+  ];
+  for (const [w, h] of candidates) {
+    if (Number(w) > 0 && Number(h) > 0) return { w: Number(w), h: Number(h) };
+  }
+  return {};
+}
+
+/* video.twimg.com puts the rendition size in the path: .../vid/avc1/1280x720/name.mp4 */
+function dimsFromUrl(url) {
+  const hit = /\/(\d{2,4})x(\d{2,4})\//.exec(String(url || ""));
+  return hit ? [Number(hit[1]), Number(hit[2])] : [0, 0];
 }
 
 function pickMp4(media) {

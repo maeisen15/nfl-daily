@@ -2,7 +2,7 @@
 
 import { el, icon } from "./lib/dom.js";
 import * as ICON from "./lib/icons.js";
-import { store, set, mergeTweets, pendingForScope } from "./store.js";
+import { store, set, mergeTweets } from "./store.js";
 import { parse, go, onRoute, key as routeKey } from "./router.js";
 import * as data from "./data.js";
 import { initTheme, renderScopes, renderTabs, renderStatus, scopeCodes } from "./views/chrome.js";
@@ -18,6 +18,7 @@ import { fetchTweets } from "./data.js";
 const main = document.getElementById("main");
 const SCOPE_KEY = "nfl-daily.scope";
 const POLL_MS = 60_000;
+const TOP_SLACK = 40;   // px from the top that still counts as "at the top"
 
 let currentKey = null;
 
@@ -65,6 +66,11 @@ async function boot() {
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") poll();
   });
+  // Scrolling back to the top is the gesture that says "I'm done with what I was reading",
+  // so it is also when anything held during the read gets folded in.
+  window.addEventListener("scroll", () => {
+    if (store.pending.length && window.scrollY <= TOP_SLACK) flushPending();
+  }, { passive: true });
   initPullToRefresh();
   initSwipe();
 }
@@ -73,7 +79,7 @@ async function boot() {
 
 function render(route = parse()) {
   const nextKey = routeKey(route);
-  // A re-render in place — more tweets paged in, a pill emptied — must not move the page.
+  // A re-render in place — more tweets paged in, held posts folded in — must not move the page.
   // Only an actual navigation banks the old position and restores the new one.
   const sameRoute = currentKey === nextKey;
   const heldScroll = window.scrollY;
@@ -95,7 +101,6 @@ function render(route = parse()) {
   }
 
   main.replaceChildren(view);
-  renderPill();
 
   if (route.name === "tweets") { hydrateFeed(main); watchSentinel(main, () => render(parse())); }
   if (route.name === "tweet") hydrateDetail(main);
@@ -134,8 +139,9 @@ function changeScope(code) {
 
 /* ---------- refresh ---------- */
 
-/* New tweets are fetched but held out of the feed. Inserting them live would move the list
- * under a thumb mid-read, so they wait behind a pill — which is what Twitter does. */
+/* New tweets are fetched in the background and held out of the feed until they can appear
+ * without moving the list under a thumb. There is nothing to dismiss and nothing to tap:
+ * scroll back to the top and the new posts are already there. */
 async function poll() {
   if (document.visibilityState !== "visible") return;
   try {
@@ -147,8 +153,8 @@ async function poll() {
     store.offline = false;
     data.state.offline = false;
     if (fresh.length) {
-      set({ pending: mergeTweets(store.pending, fresh) });
-      renderPill();
+      store.pending = mergeTweets(store.pending, fresh);
+      flushPending();
     }
     if (wasOffline) renderStatus();
   } catch {
@@ -158,22 +164,15 @@ async function poll() {
   }
 }
 
-function renderPill() {
-  document.querySelector(".new-pill")?.remove();
-  if (parse().name !== "tweets") return;
-  const n = pendingForScope(store.scope).length;
-  if (!n) return;
-  document.body.appendChild(el("button", {
-    class: "new-pill",
-    text: `${n} new post${n === 1 ? "" : "s"}`,
-    onclick: showPending,
-  }));
-}
-
-function showPending() {
+/* Held tweets go in the moment nothing would move under the reader: any view other than the
+ * feed, or a feed already at the top, where new posts land above the fold instead of pushing
+ * down whatever is being read. */
+function flushPending() {
+  if (!store.pending.length) return;
+  const onFeed = parse().name === "tweets";
+  if (onFeed && window.scrollY > TOP_SLACK) return;
   set({ tweets: mergeTweets(store.tweets, store.pending), pending: [] });
-  render(parse());
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  if (onFeed) render(parse());
 }
 
 async function refreshNow() {
@@ -241,6 +240,9 @@ function initSwipe() {
 
   main.addEventListener("touchstart", (e) => {
     if (e.touches.length !== 1 || parse().name === "tweet") { x0 = null; return; }
+    // A drag that starts on a player is aimed at the player's own controls, not at the scope
+    // tabs. Without this, reaching for the scrubber throws you into the next scope.
+    if (e.target.closest("video")) { x0 = null; return; }
     x0 = e.touches[0].clientX;
     y0 = e.touches[0].clientY;
     dx = 0; axis = null;

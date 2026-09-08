@@ -59,7 +59,7 @@ export function tweetRow(item, opts = {}) {
     textBlock(subject),
     mediaBlock(subject.media),
     quotedCard(item.quoted || subject.quoted),
-    linkCard(subject.link_card, !!(subject.media || []).length),
+    linkCard(subject, !!(subject.media || []).length),
     actionsRow(item, subject),
   ));
 
@@ -140,6 +140,10 @@ export function linkify(text) {
   return out;
 }
 
+function hostOf(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return "link"; }
+}
+
 function prettyUrl(url) {
   try {
     const u = new URL(url);
@@ -152,8 +156,21 @@ function mediaBlock(media) {
   const items = (media || []).slice(0, 4);
   if (!items.length) return null;
   const wrap = el("div", { class: `media count-${items.length}` });
-  items.forEach((m, i) => {
+  // The lightbox is a photo viewer, so it is handed the photos alone — a video's poster is not
+  // a picture you can open.
+  const photos = items.filter(m => !m.video_url && safeUrl(m.url));
+  items.forEach((m) => {
     const cell = el("div", { class: "media-item" });
+    // A single item sizes itself to its content, so its box has to be reserved before the
+    // content exists. Otherwise the cell is 2:1 until the poster loads and then jumps to the
+    // real shape, taking every tweet below it with it — which is how a tap meant for a video
+    // lands on the next post instead. The grid layouts are already square in CSS.
+    const box = items.length === 1 ? aspectOf(m) : null;
+    if (box) {
+      cell.style.aspectRatio = String(box);
+      cell.classList.add("boxed");
+    }
+
     if (m.video_url && safeUrl(m.video_url)) {
       const gif = !!m.loop;
       const video = el("video", {
@@ -165,18 +182,55 @@ function mediaBlock(media) {
       });
       // Autoplay is refused unless muted is set as a property before the source loads.
       if (gif) video.muted = true;
+      else warmVideo(video);
       cell.appendChild(video);
       if (gif) cell.appendChild(el("span", { class: "media-badge", text: "GIF" }));
     } else if (safeUrl(m.url)) {
       cell.appendChild(el("img", { src: safeUrl(m.url), alt: "", loading: "lazy", decoding: "async" }));
       cell.addEventListener("click", (e) => {
         e.stopPropagation();
-        openLightbox(items.map(x => safeUrl(x.url)).filter(Boolean), i);
+        openLightbox(photos.map(x => safeUrl(x.url)), photos.indexOf(m));
       });
     }
     wrap.appendChild(cell);
   });
   return wrap;
+}
+
+/* Width over height, from whatever the Worker recorded, falling back to the size Twitter
+ * writes into the mp4's own path for rows stored before it did. Clamped at both ends: a
+ * phone-shot vertical clip would otherwise be two screens tall, and a panorama a sliver. */
+function aspectOf(m) {
+  let w = Number(m.w) || 0, h = Number(m.h) || 0;
+  if (!(w > 0 && h > 0)) {
+    const hit = /\/(\d{2,4})x(\d{2,4})\//.exec(String(m.video_url || ""));
+    if (hit) { w = Number(hit[1]); h = Number(hit[2]); }
+  }
+  if (!(w > 0 && h > 0)) return null;
+  return Math.min(Math.max(w / h, 0.75), 2);
+}
+
+/* `preload="none"` is why a tap on a video sat there: nothing at all had been fetched, so the
+ * player had to open a connection and read the file header before it could start. Videos that
+ * come near the screen are promoted to `metadata` — a few kilobytes, and enough that play is
+ * immediate — while the rest stay cold, so opening a feed with forty clips in it doesn't fetch
+ * forty headers at once. */
+let videoWatcher = null;
+function warmVideo(video) {
+  if (!("IntersectionObserver" in window)) { video.preload = "metadata"; return; }
+  if (!videoWatcher) {
+    videoWatcher = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        videoWatcher.unobserve(e.target);
+        e.target.preload = "metadata";
+        // Safari will not act on a changed preload on its own; load() asks for the header now.
+        // Safe only while nothing has been fetched — it would restart a playing video.
+        if (e.target.readyState === 0) { try { e.target.load(); } catch { /* not ready */ } }
+      }
+    }, { rootMargin: "400px" });
+  }
+  videoWatcher.observe(video);
 }
 
 /* The quoted post: its own tappable card. One image renders as a square thumbnail beside the
@@ -218,20 +272,29 @@ function quotedCard(quoted) {
   return card;
 }
 
-function linkCard(card, compact) {
-  if (!card) return null;
-  const href = safeUrl(card.url);
+/* Every outbound link stays reachable whether or not a preview was ever built for it. A
+ * quarter of them never resolve — Substack and the Advance papers turn the fetch away, some
+ * pages carry no Open Graph tags at all — and by the time the row renders, the tweet's own
+ * text has had its t.co stub removed. Without a card of some kind the link is simply gone. */
+function linkCard(subject, compact) {
+  const card = subject.link_card || null;
+  const href = safeUrl(card && card.url) || safeUrl((subject.links || [])[0]);
   if (!href) return null;
-  const image = safeUrl(card.image);
+  const image = card ? safeUrl(card.image) : null;
+  const title = (card && card.title) || prettyUrl(href);
+  // Three shapes: full width with the image on top, a thumbnail beside the text when the tweet
+  // already carries media of its own, and text alone when there is no image to show. The last
+  // one has to skip the thumbnail column, or the headline is squeezed into what's left of it.
+  const shape = !image ? " bare" : compact ? " compact" : "";
   const node = el("a", {
-    class: `link-card${compact || !image ? " compact" : ""}`,
+    class: `link-card${shape}`,
     href, target: "_blank", rel: "noopener",
     onclick: (e) => e.stopPropagation(),
   },
     image ? el("img", { src: image, alt: "", loading: "lazy", decoding: "async" }) : null,
     el("div", { class: "link-card-body" },
-      el("div", { class: "link-card-domain", text: `From ${card.domain || ""}` }),
-      card.title ? el("div", { class: "link-card-title", text: card.title }) : null,
+      el("div", { class: "link-card-domain", text: `From ${(card && card.domain) || hostOf(href)}` }),
+      title ? el("div", { class: "link-card-title", text: title }) : null,
     ),
   );
   // A hotlink-protected or expired image would otherwise render as a broken-image glyph in a
@@ -239,7 +302,8 @@ function linkCard(card, compact) {
   const img = node.querySelector("img");
   if (img) img.addEventListener("error", () => {
     img.remove();
-    node.classList.add("compact");
+    node.classList.remove("compact");
+    node.classList.add("bare");
   }, { once: true });
   return node;
 }
@@ -314,7 +378,7 @@ export function tweetDetail(item) {
   if (media) body.appendChild(media);
   const quoted = quotedCard(item.quoted || subject.quoted);
   if (quoted) body.appendChild(quoted);
-  const card = linkCard(subject.link_card, false);
+  const card = linkCard(subject, false);
   if (card) body.appendChild(card);
 
   const views = compactCount(subject.view_count);
