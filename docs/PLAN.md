@@ -1,6 +1,6 @@
 # NFL Daily — Product Plan
 
-A private Twitter client for a curated list of NFL accounts, plus the article and briefing
+A private Twitter client for a curated list of NFL accounts, plus the article and brief
 surfaces that hang off it. One user, one iPhone, installed to the home screen.
 
 ## What this app is for
@@ -11,31 +11,29 @@ an engagement machine that keeps pushing content outside the topics he wants. Th
 part of Twitter he actually uses, with none of the part he doesn't.
 
 That framing decides most design arguments. **The Tweets tab is the product.** Articles are the
-secondary surface. The daily briefing is a convenience that has to earn its place.
+secondary surface. The daily brief is a convenience that has to earn its place.
 
 The app should feel like Twitter. Not "inspired by" — the same information design, the same
-gestures, the same density. Where a decision is ambiguous, do what Twitter does.
+gestures, the same density. Where a decision is ambiguous, do what Twitter does. The reference
+shots the feed is built against are in [design-reference/](design-reference/).
 
 ## Navigation
 
-Three tabs along the bottom, in this order:
-
-1. **Tweets** — the default tab. The app opens here.
-2. **Articles**
-3. **Home** — the daily briefing.
+Three tabs along the bottom: **Tweets** (the default — the app opens here), **Articles**,
+**Brief**.
 
 Scope tabs sit at the top, styled and behaving like Twitter's list tabs: **Ravens · NFL ·
-Steelers**, swipeable left/right, with the active scope's accent color underlining it. Ravens
-is the default.
+Steelers**, swipeable left/right, with the active scope's accent underlining it. Ravens is the
+default. Both choices persist.
 
 ## Tweets
 
-The primary surface. A chronological feed of tweets from the accounts in `config/sources.yaml`,
-scoped by the top tabs, newest first, going back seven days.
+Chronological, newest first, seven days deep, scoped by the top tabs.
 
-### The tweet row
+### The row
 
-Twitter's layout: a 40px avatar in a left column, content in a right column.
+Twitter's layout: a 40px avatar in a left column, content in a right column, hairline
+separators, no card borders.
 
 ```
 [avatar]  Jeff Zrebiec  @jeffzrebiec · 2h
@@ -47,258 +45,193 @@ Twitter's layout: a 40px avatar in a left column, content in a right column.
           💬 3    🔁 10    ♥ 314    ıl 14K              𝕏
 ```
 
-Rows are separated by a hairline, not boxed. No card borders, no inset surfaces — the row uses
-the full width, which is where the density comes from.
-
-Rules:
-
-- **Names render in the body sans face, normal case.** No condensed display font in content.
-  Outlet suffixes like `(The Athletic)` are stripped from display names everywhere.
-- **The name row never wraps.** Name and handle truncate with an ellipsis; the timestamp is
-  pinned and always visible.
-- **Text clamps at 8 lines** with an inline "Show more" that expands in place.
-- **Media** renders below the text at full column width. Tapping opens a full-screen,
-  pinch-zoomable viewer. Video is tap-to-play; GIFs autoplay muted and loop.
+- Names render in the body sans face, normal case. Outlet suffixes like `(The Athletic)` are
+  stripped from display names everywhere.
+- The name row never wraps: name and handle truncate, the timestamp is pinned and always
+  visible.
+- Text clamps at 8 lines with an inline `Show more`.
+- Media renders full column width; tapping opens a pinch-zoomable full-screen viewer. Video is
+  tap-to-play, GIFs autoplay muted and loop.
 
 ### Retweets
 
-A retweet renders as the **original** tweet, with a small gray line above the row:
-
-```
-🔁 Jonas Shaffer reposted
-[avatar]  Baltimore Banner Sports  @AllBannerSports · 3h
-          Ravens name Jovaughn Gwyn starting center for Week 1
-```
-
-The full original text, the original author's avatar and engagement counts. Never the truncated
-`RT @handle: …` string.
+A retweet renders as the **original** post — the original author's avatar, name, full text and
+counts — under a small `🔁 X reposted` line. Never Twitter's truncated `RT @handle: …` string,
+which is only a fallback for rows stored before the Worker captured the retweeted object.
 
 ### Quoted tweets
 
-A bordered, rounded card nested inside the row, carrying the quoted author's avatar, name,
-handle, timestamp, and text. When the quoted tweet has an image, it renders as a small square
-thumbnail to the left of the text rather than a full-width image.
-
-**The card is tappable** and opens that tweet's own detail view.
+A bordered card carrying the quoted author's avatar, name, handle, time and text, **tappable**
+into that tweet's own detail view. A quoted tweet with one image shows it as a small square
+thumbnail beside the text rather than full width.
 
 ### Threads
 
-Consecutive tweets from the same author in the same thread are grouped as one feed item:
-
-- **Up to 3 tweets** render inline as connected rows, with the vertical gray line running down
-  the avatar column between them.
-- **Longer threads** show the first two rows plus `Show this thread (5)`, which opens the
-  detail view.
-
-A thread counts as one item in the feed regardless of length.
+Consecutive posts by one author in one conversation group as a single feed item. Up to three
+render inline and connected by the vertical line down the avatar column; longer threads show
+the opening two plus `Show this thread (N)`.
 
 ### Link preview cards
 
-When a tweet links to an article, the destination's `og:image` and `og:title` render as a card
-below the text — image, headline, and the domain underneath — tappable to the article. This is
-a primary way articles get found, so it matters as much as anything else in the feed.
+A tweet linking to an article shows the destination's `og:image` and `og:title` as a card with
+the domain beneath. This is a primary way articles get found, so it matters as much as anything
+else in the feed.
 
 ### Engagement row
 
-Reply, retweet, like, and view counts, plus an X icon at the right that opens the tweet on
-x.com. Counts are captured when the tweet is fetched and never updated afterward — a frozen
-snapshot is fine and costs nothing.
+Reply, retweet, like and view counts, plus an X icon opening the tweet on x.com. Counts are
+captured when the tweet is fetched and never updated — a frozen snapshot costs nothing and
+refreshing would mean re-buying tweets already paid for.
 
-The **heart is the only interactive control**. Tapping it fills it and saves the tweet locally.
-
-### Likes
-
-Liking is a local gesture. Nothing is sent to Twitter, nothing is public.
-
-A liked tweet is copied in full — text, author, media, quoted post — into the browser's
-`localStorage`, so it survives the seven-day prune on the server. Storage lives on the phone
-inside Safari's storage for this site: no server, no account, no cost, and no size concern
-(a tweet is about 1KB against a ~5MB allowance).
-
-A **Liked** view lists them newest-first, reachable from the Tweets tab. It doubles as
-save-for-later.
-
-The like store sits behind a small interface so it can move to the Worker's D1 later without
-touching the views.
+The **heart is the only control**. Tapping it copies the whole tweet into `localStorage`, so a
+like outlives the seven-day prune on the server. Storage is on the device: no server, no
+account, no cost, ~5MB against ~1KB per tweet. The **Liked** view is the heart in the masthead,
+ordered by when things were liked. The like store sits behind a small interface so it can move
+to the Worker's D1 later without any view knowing.
 
 ### Refresh
 
-Three mechanisms, all pointing at the same fetch:
+Pull-to-refresh, a 60-second background poll while the app is visible, and an `N new posts`
+pill that holds new tweets out of the feed so the list never shifts under a thumb mid-read. The
+ceiling is the Worker's own five-minute poll of twitterapi.io.
 
-- **Pull-to-refresh** at the top of the feed.
-- **Background poll every 60 seconds** while the app is open and visible.
-- **A "N new tweets" pill** that appears at the top when new tweets arrive. New tweets are held
-  out of the feed until the pill is tapped, so the list never shifts under a thumb mid-read.
+### Detail view
 
-The ceiling is the Worker's own five-minute poll of twitterapi.io; nothing new exists between
-those.
-
-### Tweet detail view
-
-Tapping anywhere on a tweet row opens it at `#/tweet/<id>`:
-
-- The tweet, larger, with full text and media.
-- Its quoted tweet, tappable into its own detail view.
-- The full thread below it, connected, when it's part of one.
-- The engagement row, with the X link.
-- A back control that returns to **the exact scroll position** in the feed.
-
-Scroll position is preserved on every navigation, including tab switches and scope changes.
+Tapping a row opens `#/tweet/<id>`: the tweet larger, its quoted post tappable into its own
+detail, the full thread below, the engagement row, and a back control that restores the exact
+scroll position. Scroll position is preserved across every navigation.
 
 ## Articles
 
-A scannable list, not a firehose.
-
-### The article row
-
-Thumbnail on the left, text on the right:
+A scannable list. The row leads with the publisher's own mark, because which outlet ran a story
+is the strongest signal for whether it's worth opening, and a name has to be read where a logo
+is recognised.
 
 ```
-[img]  Cowboys Pro Bowl guard Smith headed for IR
-       Cowboys starting left guard Tyler Smith will undergo thumb…
-       ESPN · 2h
+┌──────┬──────────────────────────┬────────┐
+│ [A]  │  Baltimore Ravens tab    │        │
+│  4h  │  Jovaughn Gwyn as their  │  IMG   │
+│      │  starting center         │        │
+└──────┴──────────────────────────┴────────┘
 ```
 
-Images come from the RSS feed where it carries one, otherwise from the article's `og:image` —
-the same fetching machinery as tweet link cards. When there is genuinely no image, the row
-renders as an intentional text row rather than leaving a gray box.
+Logo and time form one centred block in the tweet row's 40px column; the thumbnail is 72px.
+Headline only — a first-line preview said little the headline didn't and cost the density that
+makes eighty items scannable.
 
-The one-line snippet stays; it is real signal at a glance.
+Images come from the RSS entry where it carries one, otherwise the article's `og:image`.
+Coverage is currently 100% across all sources. A row whose image fails to load collapses to its
+text form rather than showing a broken glyph.
 
-### Deduplication
+### Deduplication and ordering
 
-The same story from ESPN, CBS, and FOX collapses to a single row. The highest-ranked source
-wins and the others disappear silently — no "also covered by" line.
-
-Clustering is tuned **conservative**: when two articles are only probably the same story, show
-both. A missed merge is invisible; a wrong merge hides an article.
-
-### Ordering
+The same story from several outlets collapses to one row: the highest-ranked source wins and
+the others disappear silently. Clustering is tuned **conservative** — when two articles are
+only probably the same story, both stay. A missed merge is invisible; a wrong merge hides an
+article. The thresholds are `CLUSTER_MIN_JACCARD` / `CLUSTER_MIN_OVERLAP` in `publish.py`.
 
 One card layout, one sort function, a per-scope weighting:
 
-- **Ravens** sorts by source tier, then recency. Tier order: The Athletic, The Banner, Baltimore
-  Sun, Russell Street Report, Ravens official.
-- **NFL and rivals** sort by cluster size, then recency. Cluster size is the importance signal —
-  a story three outlets ran matters more than one nobody else picked up.
+- **Ravens** sorts by source tier, then recency. Athletic 10 → Banner 20 → Sun 30 → Russell
+  Street 40 → Ravens official 50.
+- **NFL and rivals** sort by cluster size, then recency — a story three outlets ran matters
+  more than one nobody else picked up.
 
-In both cases **day boundaries win**: articles group by day, newest day first, and the scope's
-weighting orders items within a day. A two-day-old piece never sits above today's news.
+**Day boundaries win in both.** A two-day-old piece never sits above today's news.
 
-## Home
+## Brief
 
-The daily briefing, restyled to match and cut down. Per scope: **Summary, Transactions,
-Injuries.** Source Health is removed from the output entirely — it is diagnostics, and it
-belongs in the run log.
-
-Cadence, prompt, and grounding rules are unchanged.
+The daily brief, per scope: **Summary, Transactions, Injuries**. Source Health is fetch
+diagnostics and is both absent from the prompt and filtered at render, so a digest written
+before that change can't show it either.
 
 ## Design system
 
-Twitter's information design throughout, on a light default.
+Twitter's information design on a light default. System sans for all content; Barlow Condensed
+survives only in the wordmark. Three themes — Light, Dim, Dark — cycled by the masthead button.
+Neutral grays, not tinted; the per-scope accent appears only on the active scope tab, the
+active bottom tab, and links. Hairline separators, full-bleed content, boxed cards only where
+Twitter uses one: quoted tweets and link previews.
 
-- **Type:** the system sans face for all content. Barlow Condensed survives only in the
-  "NFL DAILY" wordmark.
-- **Themes:** Light (white), Dim (navy-slate), Dark (near-black) — Twitter's three. Light is
-  the default; the toggle cycles.
-- **Color:** neutral grays, not purple-tinted. The per-scope accent color is retained and used
-  only for the active scope tab, the active bottom tab, and links.
-- **Structure:** hairline separators between rows, full-bleed content, no boxed cards except
-  where Twitter itself uses one — quoted tweets and link previews.
-- **Density:** matching Twitter's line-height and padding, which fits roughly 2.5 tweets per
-  screen where the current design fits 1.5.
-
-## Data model
-
-The Worker already receives everything below from twitterapi.io and discards most of it.
-Capturing it needs new columns on `tweets`, a new table, and changes to `normalize()`.
-
-New per-tweet fields:
-
-| Field | Purpose |
-|---|---|
-| `author_avatar` | `author.profilePicture` — the left column of every row |
-| `retweeted` | the full `retweeted_tweet` object, stored like `quoted` already is |
-| `conversation_id`, `reply_to_id` | thread grouping and ordering |
-| `like_count`, `retweet_count`, `reply_count`, `view_count` | the engagement row |
-| `links` | `entities.urls[].expanded_url`, the input to link preview cards |
-
-A `link_cards` table caches `url → {title, image, domain}`, populated by fetching the
-destination's Open Graph tags once at ingest. Cloudflare's outbound fetches are free, so this
-costs nothing per link beyond the first.
-
-Retention stays at **seven days**. The app requests the full seven rather than the current 48
-hours, and `GET /tweets` gains cursor pagination so infinite scroll isn't capped by the 500-row
-limit.
-
-Replies to accounts other than the author's own thread stay excluded. Showing a reply without
-its parent is confusing, and fetching parents costs 15 credits each.
-
-Old rows keep their existing fields and render without avatars or counts until they age out.
-The store is fully populated within seven days of the Worker deploying.
-
-## Front-end architecture
-
-`web/` is rebuilt from scratch. Vanilla JavaScript, no framework, no build step — the
-dependency is the durability risk in a project like this, not the code. Four separated concerns:
+## Architecture
 
 ```
+worker/          Cloudflare Worker + D1: polls twitterapi.io, resolves link cards, serves /tweets
+  migrations/    D1 schema changes, applied with `wrangler d1 execute --remote --file=`
+pipeline/        fetches articles/structured data, clusters, writes web/data/*.json
+scripts/         fetch_source_icons.py, check_allowlist.py, verify_deploy.py
 web/
-  index.html
-  app.css              design tokens + component styles
   js/
-    data.js            fetching, caching, pagination, offline fallback
-    store.js           app state: scope, tab, route, feed, likes
-    router.js          hash routes: #/tweets, #/tweet/<id>, #/liked, #/articles, #/home
-    views/
-      feed.js          the tweet feed
-      tweet.js         one tweet row (shared by feed, thread, detail)
-      detail.js        tweet detail view
-      articles.js      article list
-      home.js          the briefing
-      chrome.js        masthead, scope tabs, bottom tabs
-    lib/
-      likes.js         the like store behind a swappable interface
-      time.js, dom.js  formatting and element helpers
-  sw.js                offline: last feed stays readable with no signal
+    data.js      fetching, caching, pagination, offline fallback
+    store.js     app state: scope, route, feed, pending, likes
+    router.js    hash routes: #/tweets, #/tweet/<id>, #/liked, #/articles, #/brief
+    views/       feed, tweet, detail, articles, brief, liked, lightbox, chrome
+    lib/         dom, icons, time, likes
+  sw.js          data network-first; shell stale-while-revalidate
 ```
 
-View functions take data and return DOM elements. No `innerHTML` string concatenation, which is
-both the current XSS surface and the reason the layout is hard to reason about.
+Vanilla JavaScript, no framework, no build step — in a project like this the dependency is the
+durability risk, not the code. View functions take data and return DOM elements; nothing
+concatenates HTML, which is why text from other people can't become markup.
 
-## Build order
+The service worker serves the shell **stale-while-revalidate**. Cache-first pinned the app to
+whatever it had stored and made every deploy invisible until a version string changed by hand.
+The consequence worth knowing: a change lands on the second open, not the first.
 
-**Worker and data first**, deployed immediately — the current app ignores fields it doesn't
-know about, so the store starts filling with avatars, real retweets, threads, and engagement
-counts while the front-end is still being built.
+### Tweet data
 
-1. **Data layer.** Worker schema and `normalize()` changes; `link_cards` table and Open Graph
-   fetching; cursor pagination on `GET /tweets`; podcasts removed from `sources.yaml`; article
-   images extracted in the fetchers; article clustering and per-scope ordering in `publish.py`;
-   Source Health dropped from the digest prompt.
-2. **Front-end.** The rebuild: design system, tweet rows with avatars and engagement, retweets,
-   quoted tweets, threads, link cards, detail view and routing, scroll restoration, likes and
-   the Liked view, refresh mechanics, the article list, the restyled briefing, offline.
-3. **Search.** Full-text search over stored tweets, using D1's FTS. No API calls, no cost.
+The Worker captures what twitterapi.io sends and the app renders: `author_avatar`, the full
+`retweeted` object, `conversation_id` / `reply_to_id`, the four engagement counts, and `links`.
+A `link_cards` table caches `url → {title, image, domain}`, fetched once at ingest with
+HTMLRewriter. Open Graph URLs are HTML-entity-decoded before use — publishers routinely escape
+the ampersands in them, and image CDNs reject the result.
 
-Everything is previewed locally against live data before anything reaches the phone. The live
-app is untouched until the rebuild is complete.
+Retention is seven days. Replies to accounts other than the author's own thread are excluded at
+ingest: showing a reply without its parent is confusing, and fetching parents costs 15 credits
+each.
 
-## Deferred
+Rows written before a field existed keep NULLs and render without it. Nothing backfills
+automatically — the poll watermark only reaches forward — so the store heals as rows age out.
+`pipeline/tweets.py --mode search --since-hours N` forces it, at 15 credits per tweet returned.
 
-Not gaps — decisions to revisit once the daily-driver experience is right.
+## Adding things
 
+**An article source:** add it to `config/sources.yaml` with a `rank:`, add any new domain to
+`docs/network-allowlist.txt` **and** the cloud routine's allowlist, then run
+`python3 scripts/fetch_source_icons.py` for its logo. A site that blocks the icon crawl gets an
+`icon_url:` in its config entry, which is what espn.com needs.
+
+**A Twitter handle:** add it to `config/sources.yaml`, then `python3 pipeline/tweets.py --mode
+sync-handles`. The Worker builds its poll query from that table, so the YAML alone does
+nothing.
+
+Handle cost: 18–21 are free, each further block of 21 adds about $1.09/month, and each handle's
+own tweets run about $0.07/month. Roughly 60 handles lands near $4.50/month against a $5–10
+ceiling. **Money is not the constraint; attention is.** Be generous with Ravens handles and
+picky with national ones — thirty accounts echoing the same Schefter post is the noise this app
+exists to escape.
+
+## Not built yet
+
+- **Search** over stored tweets, using D1's full-text index. No API calls, no cost.
+- **More handles** — the list is Matt's to choose.
 - **Scores and schedule** — a thin band showing the next Ravens game or the live score. First
-  thing after the core rebuild.
+  thing after search.
 - **Gameday mode** — pregame tunnel and warmup content, live injury updates, post-game video
-  and articles. Worth designing properly; the Ravens game itself is watched elsewhere.
-- **Rivals** — whether Steelers stays its own scope or rivals collapse into the NFL scope with
-  one beat writer each. Decide after living with the new feed.
-- **More handles** — the list is a decision for Matt. Cost: handles 18–21 are free, each
-  further block of 21 adds about $1.09/month, and each handle's own tweets run about $0.07/month.
-  Roughly 60 handles lands near $4.50/month against a $5–10 ceiling.
+  and articles. Worth designing properly; the game itself is watched elsewhere.
+- **Rivals** — whether Steelers stays its own scope or rivals collapse into NFL with one beat
+  writer each. Decide after living with the feed.
 - **Likes in D1** — durable and cross-device, if losing local likes ever matters.
-- **"What you missed" briefing** — a digest generated against unseen tweets rather than a fixed
-  24-hour window. Only meaningful once unread state exists.
+- **"What you missed"** — a brief generated against unseen tweets rather than a fixed 24-hour
+  window. Only meaningful once unread state exists.
 - **Replies to other accounts** — needs parent-tweet fetching to be worth showing.
 - **Push notifications** — declined.
+
+## Known problems
+
+- **`nfl_com_news` returns zero items.** Its `link_pattern` matches nothing on the current
+  page, so NFL.com contributes no articles at all. Pre-existing and unfixed.
+- **`nfl_com_injuries` / `nfl_com_transactions`** warn with zero items outside the season's
+  transaction traffic. Expected, and ESPN's API covers both.
+- **About 250 stored tweets predate the rich-tweet fields** and render with letter badges
+  instead of avatars. They age out within a week of 2026-09-08.
