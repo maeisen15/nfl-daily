@@ -11,6 +11,7 @@ import { renderDetail, hydrateDetail } from "./views/detail.js";
 import { renderArticles } from "./views/articles.js";
 import { renderBrief } from "./views/brief.js";
 import { renderLiked, hydrateLiked } from "./views/liked.js";
+import { renderSettings } from "./views/settings.js";
 import { fetchTweets } from "./data.js";
 
 const main = document.getElementById("main");
@@ -87,6 +88,7 @@ function render(route = parse()) {
     case "articles": view = renderArticles(store.scope); break;
     case "brief":    view = renderBrief(store.scope); break;
     case "liked":    view = renderLiked(); break;
+    case "settings": view = renderSettings(); break;
     default:         view = renderFeed(store.scope); break;
   }
 
@@ -220,24 +222,90 @@ function initPullToRefresh() {
 
 /* ---------- swipe between scopes ---------- */
 
+/* The feed follows the thumb and snaps on release. Measuring the gesture only after the finger
+ * lifts is what made this feel late: nothing moved during the drag, and anything short of a
+ * decisive flick was thrown away. */
 function initSwipe() {
-  let x0 = null, y0 = null;
+  const SNAP = "swipe-snap";
+  let x0 = null, y0 = null, dx = 0, axis = null, width = 0;
+
+  const clear = () => {
+    x0 = null; axis = null; dx = 0;
+    main.style.transform = "";
+  };
+
   main.addEventListener("touchstart", (e) => {
-    if (e.touches.length !== 1) { x0 = null; return; }
+    if (e.touches.length !== 1 || parse().name === "tweet") { x0 = null; return; }
     x0 = e.touches[0].clientX;
     y0 = e.touches[0].clientY;
+    dx = 0; axis = null;
+    width = main.clientWidth || window.innerWidth;
+    main.classList.remove(SNAP);
   }, { passive: true });
 
-  main.addEventListener("touchend", (e) => {
-    if (x0 === null || parse().name === "tweet") return;
-    const t = e.changedTouches[0];
-    const dx = t.clientX - x0, dy = t.clientY - y0;
-    x0 = null;
-    // Horizontal, decisive, and clearly not a scroll.
-    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.8) return;
+  main.addEventListener("touchmove", (e) => {
+    if (x0 === null) return;
+    const mx = e.touches[0].clientX - x0;
+    const my = e.touches[0].clientY - y0;
+    // Decide once which way this gesture is going, and stay out of the way if it's a scroll.
+    if (!axis) {
+      if (Math.abs(mx) < 8 && Math.abs(my) < 8) return;
+      axis = Math.abs(mx) > Math.abs(my) * 1.2 ? "x" : "y";
+      if (axis === "y") { x0 = null; return; }
+    }
     const codes = scopeCodes();
     const i = codes.indexOf(store.scope);
-    const next = codes[i + (dx < 0 ? 1 : -1)];
-    if (next) changeScope(next);
+    // The first and last scope resist rather than slide, so an edge reads as an edge and not
+    // as a swipe that failed.
+    const atEdge = (mx > 0 && i <= 0) || (mx < 0 && i >= codes.length - 1);
+    dx = atEdge ? mx * 0.25 : mx;
+    main.style.transform = `translateX(${dx}px)`;
   }, { passive: true });
+
+  const settle = () => {
+    if (x0 === null || axis !== "x") { clear(); return; }
+    const codes = scopeCodes();
+    const next = codes[codes.indexOf(store.scope) + (dx < 0 ? 1 : -1)];
+    const far = Math.abs(dx) > Math.min(64, width * 0.22);
+    const dir = dx < 0 ? -1 : 1;
+    x0 = null; axis = null;
+
+    main.classList.add(SNAP);
+    if (!next || !far) {
+      main.style.transform = "";
+      return;
+    }
+    // Out under the thumb, swap the scope while off-screen, then in from the other side.
+    main.style.transform = `translateX(${dir * width}px)`;
+    once(main, () => {
+      main.classList.remove(SNAP);
+      main.style.transform = `translateX(${-dir * width}px)`;
+      changeScope(next);
+      requestAnimationFrame(() => {
+        main.classList.add(SNAP);
+        main.style.transform = "";
+      });
+    });
+  };
+
+  main.addEventListener("touchend", settle, { passive: true });
+  main.addEventListener("touchcancel", () => {
+    main.classList.add(SNAP);
+    clear();
+  }, { passive: true });
+}
+
+/* transitionend can simply not arrive — an interrupted or zero-length transition never fires
+ * it — and a swipe that never completes would leave the feed stranded off-screen. */
+function once(el, fn) {
+  let done = false;
+  const run = () => {
+    if (done) return;
+    done = true;
+    el.removeEventListener("transitionend", run);
+    clearTimeout(timer);
+    fn();
+  };
+  const timer = setTimeout(run, 320);
+  el.addEventListener("transitionend", run);
 }

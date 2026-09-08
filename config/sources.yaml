@@ -312,6 +312,91 @@ team_coverage:
         name: "Ken McKusick (Filmstudy)"
         enabled: true
         feed: true
+      - handle: "jamisonhensley"
+        name: "Jamison Hensley (ESPN)"
+        enabled: true
+        feed: true
+      - handle: "ryanmink"
+        name: "Ryan Mink (Ravens.com)"
+        enabled: true
+        feed: true
+      - handle: "GarrettDowning"
+        name: "Garrett Downing (Ravens.com)"
+        enabled: true
+        feed: true
+      - handle: "brianwacker1"
+        name: "Brian Wacker (Baltimore Sun)"
+        enabled: true
+        feed: true
+      - handle: "ChildsWalker"
+        name: "Childs Walker (The Banner)"
+        enabled: true
+        feed: true
+      - handle: "giana_jade"
+        name: "Giana Han (The Banner)"
+        enabled: true
+        feed: true
+      - handle: "kylegoon"
+        name: "Kyle Goon (The Banner)"
+        enabled: true
+        feed: true
+      - handle: "bsmolka"
+        name: "Bo Smolka"
+        enabled: true
+        feed: true
+      - handle: "RussellStReport"
+        name: "Russell Street Report"
+        enabled: true
+        feed: true
+      - handle: "BmoreBeatdown"
+        name: "Baltimore Beatdown (SB Nation)"
+        enabled: true
+        feed: true
+      - handle: "HoodieRamey"
+        name: "Ramey"
+        enabled: true
+        feed: true
+        feed_only: true
+      - handle: "BarstoolBanks"
+        name: "Banks (Barstool)"
+        enabled: true
+        feed: true
+        feed_only: true
+      - handle: "ravens4dummies"
+        name: "Spenny Powers (Ravens for Dummies)"
+        enabled: true
+        feed: true
+        feed_only: true
+      - handle: "NflOgden"
+        name: "James Ogden"
+        enabled: true
+        feed: true
+        feed_only: true
+      - handle: "nikknowsball"
+        name: "Nikhil Mehta"
+        enabled: true
+        feed: true
+        feed_only: true
+      - handle: "jakelouque"
+        name: "Jake Louque"
+        enabled: true
+        feed: true
+        feed_only: true
+      - handle: "TheMattWise"
+        name: "Matt Wise"
+        enabled: true
+        feed: true
+        feed_only: true
+      - handle: "GarrettSprints"
+        name: "Garrett Ferguson"
+        enabled: true
+        feed: true
+        feed_only: true
+      - handle: "sgellison"
+        name: "Sarah Ellison"
+        enabled: true
+        feed: true
+        feed_only: true
 
   rivals:
     - team_code: PIT
@@ -344,6 +429,79 @@ team_coverage:
       twitter_handles:
         - handle: "FarabaughFB"
           name: "Nick Farabaugh (PennLive)"
+          enabled: true
+          feed: true
+
+    - team_code: CIN
+      display_name: "Cincinnati Bengals"
+      news_sources:
+        - id: rival_cin_news_cincy_jungle
+          name: "Cincy Jungle — Bengals"
+          url: "https://www.cincyjungle.com/"
+          rss_url: "https://www.cincyjungle.com/rss/index.xml"
+          fetch: "rss"
+          rank: 20
+          enabled: true
+        # The Enquirer retired its RSS feeds, so the SB Nation site is the only Bengals feed that
+        # still answers.
+
+      twitter_handles:
+        - handle: "pauldehnerjr"
+          name: "Paul Dehner Jr. (The Athletic)"
+          enabled: true
+          feed: true
+
+    - team_code: CLE
+      display_name: "Cleveland Browns"
+      news_sources:
+        - id: rival_cle_news_cleveland_com
+          name: "cleveland.com — Browns"
+          url: "https://www.cleveland.com/browns/"
+          rss_url: "https://www.cleveland.com/arc/outboundfeeds/rss/category/browns/?outputType=xml"
+          fetch: "rss"
+          rank: 20
+          enabled: true
+
+      twitter_handles:
+        - handle: "MaryKayCabot"
+          name: "Mary Kay Cabot (cleveland.com)"
+          enabled: true
+          feed: true
+
+    - team_code: KC
+      display_name: "Kansas City Chiefs"
+      news_sources:
+        - id: rival_kc_news_arrowhead_pride
+          name: "Arrowhead Pride — Chiefs"
+          url: "https://www.arrowheadpride.com/"
+          rss_url: "https://www.arrowheadpride.com/rss/index.xml"
+          fetch: "rss"
+          rank: 20
+          enabled: true
+        # The Kansas City Star stalls non-browser clients rather than refusing them, so it cannot be
+        # fetched from a job at all.
+
+      twitter_handles:
+        - handle: "ByNateTaylor"
+          name: "Nate Taylor (ESPN)"
+          enabled: true
+          feed: true
+
+    - team_code: BUF
+      display_name: "Buffalo Bills"
+      news_sources:
+        - id: rival_buf_news_buffalo_news
+          name: "The Buffalo News — Bills"
+          url: "https://buffalonews.com/sports/bills/"
+          rss_url: "https://buffalonews.com/search/?f=rss&t=article&c=sports/bills&l=50&s=start_time&sd=desc"
+          fetch: "rss"
+          rank: 20
+          enabled: true
+        # Answers 429 under rapid requests; the hourly cadence stays well clear of it.
+
+      twitter_handles:
+        - handle: "JoeBuscaglia"
+          name: "Joe Buscaglia (The Athletic)"
           enabled: true
           feed: true
 

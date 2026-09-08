@@ -44,6 +44,10 @@ ARTICLE_WINDOW_HOURS = 48
 # High enough that an unranked source always sorts below a ranked one and loses every cluster.
 DEFAULT_SOURCE_RANK = 99
 
+# Every rival team shares one scope. Matt checks these teams once or twice a week; a tab each
+# would be five near-empty rooms, and the point is keeping half an eye on them together.
+RIVALS_SCOPE = "rivals"
+
 TEAM_CODES = {
     "Arizona Cardinals": "ARI", "Atlanta Falcons": "ATL", "Baltimore Ravens": "BAL",
     "Buffalo Bills": "BUF", "Carolina Panthers": "CAR", "Chicago Bears": "CHI",
@@ -178,7 +182,7 @@ def article_scopes(source_id, tracked_rival_codes):
     m = re.match(r"rival_([a-z]{2,3})_", source_id)
     if m:
         code = m.group(1).upper()
-        return [code] if code in tracked_rival_codes else ["national"]
+        return [RIVALS_SCOPE] if code in tracked_rival_codes else ["national"]
     return ["national"]
 
 
@@ -380,8 +384,8 @@ def build_items(run, primary_code, rival_codes, source_ranks=None):
     tweet_feeds = run.get("tweet_feeds") or {}
     scope_map = {"national": ["national"], "ravens": [primary_code]}
     grouped = [(scope_map.get(k), v) for k, v in tweet_feeds.items() if k != "rivals"]
-    for code, feed in (tweet_feeds.get("rivals") or {}).items():
-        grouped.append(([code], feed))
+    for _code, feed in (tweet_feeds.get("rivals") or {}).items():
+        grouped.append(([RIVALS_SCOPE], feed))
     for scopes, feed in grouped:
         if not scopes:
             continue
@@ -424,8 +428,10 @@ def build_items(run, primary_code, rival_codes, source_ranks=None):
         if rtype:  # transaction / injury
             team_code = resolve_team(r)
             scopes = ["national"]
-            if team_code in tracked:
-                scopes.append(team_code)
+            if team_code == primary_code:
+                scopes.append(primary_code)
+            elif team_code in rival_codes:
+                scopes.append(RIVALS_SCOPE)
             add({
                 "id": item_id(rtype, sid, r.get("title"), r.get("published_at")),
                 "type": rtype,
@@ -480,12 +486,35 @@ def build_digest(run, primary, rivals):
         tabs.append({"scope": primary.get("team_code", "BAL"),
                      "label": primary.get("display_name", "Ravens"),
                      "markdown": outputs["ravens"]["full_markdown"]})
+    # One Rivals tab, not one per team. Each team keeps its own section inside it, ordered the
+    # way sources.yaml lists them so the tab doesn't reshuffle as teams have quiet weeks.
     rival_names = {r.get("team_code"): r.get("display_name") for r in rivals}
-    for code, out in (outputs.get("rivals") or {}).items():
-        if out.get("full_markdown"):
-            tabs.append({"scope": code, "label": rival_names.get(code, code),
-                         "markdown": out["full_markdown"]})
+    order = [r.get("team_code") for r in rivals]
+    rival_outputs = outputs.get("rivals") or {}
+    sections = []
+    for code in order:
+        markdown = (rival_outputs.get(code) or {}).get("full_markdown")
+        if markdown:
+            sections.append(retitle_sections(markdown, rival_names.get(code, code)))
+    if sections:
+        tabs.append({"scope": RIVALS_SCOPE, "label": "Rivals", "markdown": "\n\n".join(sections)})
     return tabs
+
+
+def retitle_sections(markdown, team):
+    """Fold a per-team digest into the shared Rivals tab by naming its team in every heading.
+
+    The app's brief renderer understands exactly one heading level. Nesting each team's
+    existing `## Summary` under a `## Steelers` would need a second level it does not parse,
+    and the heading would render as literal text — so the team name joins the section title
+    instead of sitting above it."""
+    out = []
+    for line in markdown.split("\n"):
+        if line.startswith("# "):
+            continue
+        m = re.match(r"^##\s+(.*)$", line)
+        out.append(f"## {team} · {m.group(1).strip()}" if m else line)
+    return "\n".join(out).strip()
 
 
 def main():
@@ -568,9 +597,8 @@ def main():
             [{"code": primary_code, "label": primary.get("display_name", primary_code),
               "short": (primary.get("display_name") or primary_code).split()[-1], "role": "primary"}]
             + [{"code": "national", "label": "NFL", "short": "NFL", "role": "national"}]
-            + [{"code": r["team_code"], "label": r.get("display_name", r["team_code"]),
-                "short": (r.get("display_name") or r["team_code"]).split()[-1], "role": "rival"}
-               for r in rivals]
+            + ([{"code": RIVALS_SCOPE, "label": "Rivals", "short": "Rivals", "role": "rival"}]
+               if rivals else [])
         ),
     })
     write("feed.json", {

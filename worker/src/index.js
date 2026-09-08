@@ -29,6 +29,22 @@ const DEFAULT_PAGE = 200;
 const LINK_CARDS_PER_POLL = 12;
 const LINK_FETCH_TIMEOUT_MS = 4000;
 const LINK_CARD_RETRY_DAYS = 7;
+
+/* twitterapi.io pricing, in credits, where 100,000 credits = $1.00. Measured against the
+ * billing endpoint: a request returning nothing costs ~26, and a request returning 20 tweets
+ * costs 300 — exactly 20 x 15, with no separate base added on top. So the floor is what an
+ * empty request costs, not a surcharge, and two tweets is enough to clear it.
+ *
+ * There is no billing API and no cost header on a response, so this cannot be checked against
+ * an invoice from here. That is why usage_daily stores requests and tweets rather than
+ * dollars: if these numbers are wrong, correcting them re-prices the whole history. */
+const CREDITS_PER_REQUEST_FLOOR = 26;
+const CREDITS_PER_TWEET = 15;
+const CREDITS_PER_USD = 100_000;
+
+function requestCredits(tweets) {
+  return Math.max(CREDITS_PER_REQUEST_FLOOR, tweets * CREDITS_PER_TWEET);
+}
 const LINK_CARD_KEEP_DAYS = 30;
 
 // Cron strings, mirrored from wrangler.toml. scheduled() routes on these.
@@ -50,6 +66,7 @@ export default {
         case "POST /push":   return await push(request, env);
         case "GET /tweets":  return await getTweets(request, env, url, origin);
         case "GET /health":  return await health(env, origin);
+        case "GET /usage":   return await usage(env, url, origin);
         default:
           return json({ error: "not found" }, 404, env, origin);
       }
@@ -121,6 +138,25 @@ async function push(request, env) {
   const source = "search";
   const { written, links } = await upsertAll(env, raw, source);
   if (links.length) await refreshLinkCards(env, links);
+
+  // A manual backfill is bought from the same account as the poll, so it belongs in the same
+  // ledger. The caller reports its own request count because only it knows how many pages it
+  // asked for; without that the month understates what was actually spent.
+  if (body.usage && Number(body.usage.requests) > 0) {
+    const byHandle = new Map();
+    for (const t of raw) {
+      const h = String(t?.author?.userName || "").toLowerCase();
+      if (h) byHandle.set(h, (byHandle.get(h) || 0) + 1);
+    }
+    try {
+      await recordUsage(env, new Date(), {
+        polls: 0, requests: Number(body.usage.requests),
+        tweets: Number(body.usage.tweets ?? raw.length), byHandle,
+      });
+    } catch (err) {
+      console.error("usage record failed", err && err.stack ? err.stack : String(err));
+    }
+  }
   return json({ ok: true, received: raw.length, written, handles_synced: handlesSynced }, 200, env, "");
 }
 
@@ -306,6 +342,12 @@ async function poll(env, now) {
 
   let returned = 0, pages = 0, written = 0, truncated = false;
   const links = new Set();
+  // Billed per tweet returned, so a handle's share of the bill is its share of these — counted
+  // before dedupe, because a tweet already stored was still paid for again.
+  const byHandle = new Map();
+  // Cost is per request, and a request that comes back nearly empty still pays the floor. One
+  // number for the day would lose that, so each request's own credits are added up here.
+  let credits = 0;
   try {
     for (const query of queries) {
       let cursor = "", page = 0;
@@ -313,6 +355,11 @@ async function poll(env, now) {
         const body = await searchPage(env, query, cursor);
         const tweets = Array.isArray(body.tweets) ? body.tweets : [];
         returned += tweets.length;
+        credits += requestCredits(tweets.length);
+        for (const t of tweets) {
+          const h = String(t?.author?.userName || "").toLowerCase();
+          if (h) byHandle.set(h, (byHandle.get(h) || 0) + 1);
+        }
         page += 1; pages += 1;
         if (tweets.length) {
           const res = await upsertAll(env, tweets, "poll");
@@ -347,12 +394,18 @@ async function poll(env, now) {
   console.log(`poll: ${handles.length} handles, ${queries.length} query(s), ${pages} page(s), ` +
               `${returned} returned, ${written} written, since ${since.toISOString()}`);
 
+  // Never let bookkeeping lose an ingest that already succeeded and was already paid for.
+  try {
+    await recordUsage(env, now, { polls: 1, requests: pages, tweets: returned, byHandle });
+  } catch (err) {
+    console.error("usage record failed", err && err.stack ? err.stack : String(err));
+  }
+
   await recordPoll(env, now, {
     ok: true, cadence_minutes: cadence, since: since.toISOString(),
     handles: handles.length, queries: queries.length, pages,
     returned, written, truncated, link_cards: cards,
-    // ~26 credits per request plus 15 per tweet returned; useful for spotting a cost regression.
-    est_credits: pages * 26 + returned * 15,
+    credits,
   });
 }
 
@@ -417,6 +470,150 @@ async function recordPoll(env, now, detail) {
     `INSERT INTO meta (key, value, updated_at) VALUES ('last_poll', ?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
   ).bind(value, now.toISOString()).run();
+}
+
+/* ---------- usage ---------- */
+
+/* What the polling actually cost, so the decision to add a handle or change the cadence is
+ * made against real numbers instead of an estimate. twitterapi.io reports nothing — no billing
+ * endpoint, no cost header — so this is the only record that exists. */
+async function recordUsage(env, now, { polls, requests, tweets, byHandle }) {
+  const day = easternDay(now);
+  const writes = [
+    env.DB.prepare(
+      `INSERT INTO usage_daily (day, polls, requests, tweets) VALUES (?,?,?,?)
+       ON CONFLICT(day) DO UPDATE SET
+         polls = polls + excluded.polls,
+         requests = requests + excluded.requests,
+         tweets = tweets + excluded.tweets`
+    ).bind(day, polls, requests, tweets),
+  ];
+  for (const [handle, count] of byHandle || []) {
+    writes.push(env.DB.prepare(
+      `INSERT INTO usage_handle_daily (day, handle, tweets) VALUES (?,?,?)
+       ON CONFLICT(day, handle) DO UPDATE SET tweets = tweets + excluded.tweets`
+    ).bind(day, handle, count));
+  }
+  await env.DB.batch(writes);
+}
+
+/* The month to date, the daily series behind it, and what each handle contributed.
+ *
+ * Public, like /health. It reveals what this app spends and who it watches, which is not a
+ * secret; the alternative is a token the app would have to hold, and a static site has nowhere
+ * safe to keep one. */
+async function usage(env, url, origin) {
+  const now = new Date();
+  const month = (url.searchParams.get("month") || easternDay(now).slice(0, 7)).slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(month)) return json({ error: "bad month" }, 400, env, origin);
+
+  const [daysRes, handlesRes, watched] = await Promise.all([
+    env.DB.prepare(
+      `SELECT day, polls, requests, tweets FROM usage_daily
+        WHERE day LIKE ? ORDER BY day`
+    ).bind(`${month}-%`).all(),
+    env.DB.prepare(
+      `SELECT handle, SUM(tweets) AS tweets FROM usage_handle_daily
+        WHERE day LIKE ? GROUP BY handle ORDER BY tweets DESC`
+    ).bind(`${month}-%`).all(),
+    env.DB.prepare("SELECT handle, display_name, scope FROM handles").all(),
+  ]);
+
+  const days = (daysRes.results || []).map(r => ({
+    day: r.day, polls: r.polls, requests: r.requests, tweets: r.tweets,
+    usd: dayUsd(r.requests, r.tweets),
+  }));
+  const totals = days.reduce((acc, d) => ({
+    polls: acc.polls + d.polls, requests: acc.requests + d.requests,
+    tweets: acc.tweets + d.tweets, usd: acc.usd + d.usd,
+  }), { polls: 0, requests: 0, tweets: 0, usd: 0 });
+
+  // A month is only worth projecting from days that actually happened; today is still running,
+  // so it is counted in the spend but not in the divisor.
+  const elapsed = Math.max(1, days.length);
+  const inMonth = daysInMonth(month);
+  const perDay = totals.usd / elapsed;
+
+  const meta = new Map((watched.results || []).map(r => [String(r.handle).toLowerCase(), r]));
+  const rows = (handlesRes.results || []).map(r => {
+    const info = meta.get(String(r.handle).toLowerCase());
+    return {
+      handle: r.handle,
+      display_name: info?.display_name || r.handle,
+      scope: info?.scope || null,
+      watched: Boolean(info),
+      tweets: r.tweets,
+      // Tweets are billed per tweet, so this share is exact. The per-request floor is a
+      // property of the schedule, not of any handle, and is reported separately below.
+      usd: round4((r.tweets * CREDITS_PER_TWEET) / CREDITS_PER_USD),
+    };
+  });
+  const tweetUsd = round4((totals.tweets * CREDITS_PER_TWEET) / CREDITS_PER_USD);
+
+  return json({
+    month,
+    days,
+    month_to_date: {
+      ...totals, usd: round4(totals.usd),
+      days_elapsed: elapsed, days_in_month: inMonth,
+      projected_usd: round4(perDay * inMonth),
+      tweet_usd: tweetUsd,
+      // Whatever the tweets did not account for is the price of asking at all.
+      schedule_usd: round4(Math.max(0, totals.usd - tweetUsd)),
+    },
+    handles: rows,
+    cadence: projectCadence(totals, elapsed, (watched.results || []).length),
+    pricing: {
+      credits_per_request_floor: CREDITS_PER_REQUEST_FLOOR,
+      credits_per_tweet: CREDITS_PER_TWEET,
+      credits_per_usd: CREDITS_PER_USD,
+      note: "Computed, not billed. twitterapi.io publishes no usage API.",
+    },
+  }, 200, env, origin, { "Cache-Control": "public, max-age=300" });
+}
+
+/* What a different polling cadence would cost at the tweet volume actually observed.
+ *
+ * The tweets themselves cost the same however often they are collected — the same posts get
+ * fetched either way. What changes is how many requests it takes, and how many of those come
+ * back nearly empty and pay the floor for nothing. */
+function projectCadence(totals, elapsed, handleCount) {
+  const tweetsPerDay = totals.tweets / elapsed;
+  // The poll runs 9am-7pm at full cadence and 8-9am plus 7-11pm at a third of it; overnight it
+  // sleeps. This is that schedule expressed as waking minutes.
+  const WAKING_MINUTES = 10 * 60 + 5 * 60;
+  const queriesPerPoll = Math.max(1, Math.ceil(handleCount / 21));
+  return [1, 5, 10, 15].map(minutes => {
+    const polls = WAKING_MINUTES / minutes;
+    const requests = polls * queriesPerPoll;
+    const perRequest = tweetsPerDay / Math.max(1, requests);
+    const perDay = requests * Math.max(CREDITS_PER_REQUEST_FLOOR, perRequest * CREDITS_PER_TWEET);
+    return { minutes, requests_per_day: Math.round(requests),
+             usd_per_month: round4((perDay / CREDITS_PER_USD) * 30) };
+  });
+}
+
+function dayUsd(requests, tweets) {
+  // Reconstructing per-request cost from daily totals assumes the tweets arrived evenly across
+  // the day's requests. Real days are lumpier, which makes this a slight underestimate on the
+  // quiet end — the floor binds on more requests than an average implies.
+  const per = requests ? tweets / requests : 0;
+  return (requests * Math.max(CREDITS_PER_REQUEST_FLOOR, per * CREDITS_PER_TWEET)) / CREDITS_PER_USD;
+}
+
+function easternDay(date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(date);
+}
+
+function daysInMonth(month) {
+  const [y, m] = month.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).getUTCDate();
+}
+
+function round4(n) {
+  return Math.round(n * 10000) / 10000;
 }
 
 /* ---------- link preview cards ---------- */

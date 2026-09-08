@@ -10,7 +10,7 @@ export function parse() {
   const params = new URLSearchParams(query || "");
   if (!parts.length) return { name: "tweets", params };
   if (parts[0] === "tweet" && parts[1]) return { name: "tweet", id: parts[1], params };
-  if (["tweets", "articles", "brief", "liked"].includes(parts[0])) return { name: parts[0], params };
+  if (["tweets", "articles", "brief", "liked", "settings"].includes(parts[0])) return { name: parts[0], params };
   return { name: "tweets", params };
 }
 
@@ -25,6 +25,8 @@ export function go(hash, { replace = false } = {}) {
 /* The tab a route belongs to, which is what the bottom bar highlights — a tweet detail opened
  * from the feed still reads as "Tweets". */
 export function tabFor(route) {
+  // Settings is reached from the masthead, not the bottom bar, so it highlights nothing there.
+  if (route.name === "settings") return null;
   if (route.name === "tweet" || route.name === "liked") return "tweets";
   return route.name;
 }

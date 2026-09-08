@@ -94,7 +94,9 @@ check("1 injury kept", len(by_type.get("injury", [])) == 1)
 
 txn = by_type.get("transaction", [{}])[0]
 check("transaction tagged PIT via authoritative team (not ARI from title scan)",
-      txn.get("team") == "PIT" and "PIT" in txn.get("scopes", []))
+      txn.get("team") == "PIT")
+check("a rival's transaction is scoped to the shared rivals tab",
+      "rivals" in txn.get("scopes", []) and "PIT" not in txn.get("scopes", []))
 inj = by_type.get("injury", [{}])[0]
 check("injury tagged BAL", inj.get("team") == "BAL" and "BAL" in inj.get("scopes", []))
 

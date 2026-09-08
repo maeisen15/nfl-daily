@@ -106,7 +106,7 @@ def main() -> int:
     print(f"search watermark: {since.isoformat()} "
           f"({(datetime.now(timezone.utc) - since).total_seconds() / 3600:.1f}h back)",
           file=sys.stderr)
-    tweets = sweep_search(api_key, handles, since)
+    tweets, requests_made = sweep_search(api_key, handles, since)
 
     unique = dedupe(tweets)
     elapsed = time.monotonic() - started
@@ -121,7 +121,7 @@ def main() -> int:
         summarize(unique)
         return 0
 
-    result = push(worker_url, push_secret, unique, handles, args.mode)
+    result = push(worker_url, push_secret, unique, handles, args.mode, requests_made)
     print(f"pushed: {json.dumps(result)}", file=sys.stderr)
     summarize(unique)
     return 0
@@ -157,10 +157,10 @@ def load_handles() -> list[dict[str, Any]]:
     primary_code = primary.get("team_code", "BAL")
     for tw in primary.get("twitter_handles") or []:
         add(tw, primary_code)
+    # Every rival shares one scope; see RIVALS_SCOPE in publish.py for why.
     for rival in tc.get("rivals") or []:
-        code = rival.get("team_code") or ""
         for tw in rival.get("twitter_handles") or []:
-            add(tw, code)
+            add(tw, "rivals")
 
     return out
 
@@ -211,8 +211,10 @@ def resolve_since(worker_url: str, since_hours: float | None) -> datetime:
     return now - timedelta(hours=2)
 
 
-def sweep_search(api_key: str, handles: list[dict[str, Any]], since: datetime) -> list[dict]:
+def sweep_search(api_key: str, handles: list[dict[str, Any]], since: datetime) -> tuple[list[dict], int]:
+    """Returns the tweets and the number of requests they took, which is what they cost."""
     out: list[dict] = []
+    requests_made = 0
     for i, query in enumerate(build_queries(handles, since), 1):
         page, cursor, got = 0, "", 0
         while page < MAX_PAGES_SEARCH:
@@ -220,6 +222,7 @@ def sweep_search(api_key: str, handles: list[dict[str, Any]], since: datetime) -
             if cursor:
                 params["cursor"] = cursor
             body = api_get(api_key, "/twitter/tweet/advanced_search", params)
+            requests_made += 1
             tweets = body.get("tweets") or []
             out.extend(tweets)
             got += len(tweets)
@@ -231,7 +234,7 @@ def sweep_search(api_key: str, handles: list[dict[str, Any]], since: datetime) -
             print(f"warn: query {i} hit the {MAX_PAGES_SEARCH}-page cap — "
                   f"older tweets in this window were not fetched", file=sys.stderr)
         print(f"  query {i}: {got} tweets over {page} page(s)", file=sys.stderr)
-    return out
+    return out, requests_made
 
 
 def _warn_if_query_splits(handles: list[dict[str, Any]]) -> None:
@@ -297,8 +300,13 @@ def api_get(api_key: str, path: str, params: dict[str, Any]) -> dict:
     raise RuntimeError(f"request failed after retries: {last_exc}")
 
 
-def push(worker_url: str, secret: str, tweets: list[dict], handles: list[dict], mode: str) -> dict:
-    """POST tweets to the Worker in batches, syncing the handle->scope map on the first one."""
+def push(worker_url: str, secret: str, tweets: list[dict], handles: list[dict], mode: str,
+         requests_made: int = 0) -> dict:
+    """POST tweets to the Worker in batches, syncing the handle->scope map on the first one.
+
+    `requests_made` is how many Advanced Search requests this backfill paid for. The Worker
+    cannot know that — it only sees the tweets — and without it the usage ledger would show
+    the poll's spending while a backfill's stayed invisible."""
     BATCH = 100
     totals = {"received": 0, "written": 0, "handles_synced": 0}
     batches = [tweets[i:i + BATCH] for i in range(0, len(tweets), BATCH)] or [[]]
@@ -306,6 +314,8 @@ def push(worker_url: str, secret: str, tweets: list[dict], handles: list[dict], 
         payload = {"tweets": batch, "source": mode}
         if i == 0:
             payload["handles"] = handles
+            if requests_made:
+                payload["usage"] = {"requests": requests_made, "tweets": len(tweets)}
         res = http_json("POST", f"{worker_url}/push", payload,
                         headers={"Authorization": f"Bearer {secret}"})
         for k in totals:
