@@ -30,6 +30,9 @@ export function renderArticles(scope) {
   return wrap;
 }
 
+/* The publisher's mark rather than its name. "NYT Athletic — Ravens" has to be read; the
+ * Athletic's A is recognised at a glance, and which outlet ran a story is the single strongest
+ * signal for whether it's worth opening. */
 function articleRow(item) {
   const image = safeUrl((item.media || [])[0]?.url);
   const row = el("a", {
@@ -37,21 +40,42 @@ function articleRow(item) {
     href: safeUrl(item.url) || "#",
     target: "_blank", rel: "noopener",
   },
-    el("div", {},
-      el("div", { class: "article-source",
-                  text: `${item.source_name || ""} · ${shortTime(item.published_at)}` }),
+    el("div", { class: "article-mark" },
+      sourceMark(item),
+      el("span", { class: "article-time", text: shortTime(item.published_at) }),
+    ),
+    el("div", { class: "article-main" },
       el("div", { class: "article-title", text: item.title || "" }),
-      item.text ? el("div", { class: "article-snippet", text: item.text }) : null,
     ),
     image ? el("img", { class: "article-thumb", src: image, alt: "", loading: "lazy", decoding: "async" }) : null,
   );
   // A dead image URL collapses the row to its text form rather than showing a broken glyph.
-  const img = row.querySelector("img");
-  if (img) img.addEventListener("error", () => {
-    img.remove();
+  const thumb = row.querySelector(".article-thumb");
+  if (thumb) thumb.addEventListener("error", () => {
+    thumb.remove();
     row.classList.add("no-image");
   }, { once: true });
   return row;
+}
+
+/* Icons are fetched once by scripts/fetch_source_icons.py and served from this origin, so the
+ * list costs no third-party request per row and still works offline. A source added without
+ * running that script falls back to its initial rather than a hole. */
+function sourceMark(item) {
+  const name = item.source_name || "";
+  const badge = () => el("div", {
+    class: "article-logo article-logo-fallback",
+    title: name,
+    text: name.replace(/^(The|A)\s+/i, "").charAt(0).toUpperCase() || "?",
+  });
+  if (!item.source_id) return badge();
+  const img = el("img", {
+    class: "article-logo",
+    src: `icons/sources/${encodeURIComponent(item.source_id)}.png`,
+    alt: name, title: name, loading: "lazy", decoding: "async",
+  });
+  img.addEventListener("error", () => img.replaceWith(badge()), { once: true });
+  return img;
 }
 
 /* Day boundaries win everywhere — a two-day-old piece above today's news is what makes the tab

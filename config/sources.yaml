@@ -24,6 +24,9 @@ news_sources:
     fetch: "rss"
     rank: 20
     fetch_og_image: true
+    # espn.com sits behind Akamai, which answers the icon crawl with an empty 202. The CDN
+    # host serves the same mark without the bot wall.
+    icon_url: "https://a.espncdn.com/favicon.ico"
     enabled: true
 
   - id: cbs_nfl

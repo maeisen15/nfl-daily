@@ -1,11 +1,16 @@
-/* NFL Daily service worker — cache shell, network-first for data. */
-const SHELL = "nfl-daily-shell-v9";
+/* NFL Daily service worker.
+ *
+ * Data (the app's JSON and the Worker's tweets) is network-first, so an online app is always
+ * current and an offline one still has the last feed. The shell is stale-while-revalidate, so
+ * the app opens instantly from cache and picks up a deploy on the following open.
+ */
+const SHELL = "nfl-daily-shell-v11";
 const SHELL_FILES = [
   "index.html", "app.css", "manifest.webmanifest",
   "js/main.js", "js/data.js", "js/store.js", "js/router.js",
   "js/lib/dom.js", "js/lib/icons.js", "js/lib/time.js", "js/lib/likes.js",
   "js/views/chrome.js", "js/views/feed.js", "js/views/tweet.js", "js/views/detail.js",
-  "js/views/articles.js", "js/views/home.js", "js/views/liked.js", "js/views/lightbox.js",
+  "js/views/articles.js", "js/views/brief.js", "js/views/liked.js", "js/views/lightbox.js",
 ];
 
 self.addEventListener("install", (e) => {
@@ -36,7 +41,22 @@ self.addEventListener("fetch", (e) => {
       }).catch(() => caches.match(stripQuery(e.request)))
     );
   } else {
-    e.respondWith(caches.match(e.request).then(hit => hit || fetch(e.request)));
+    // Stale-while-revalidate for the shell. Cache-first alone was wrong: it pinned the app to
+    // whatever was cached and made every deploy invisible until this file's version string
+    // changed by hand. Answering from cache keeps the app opening instantly; refreshing the
+    // entry in the background means the next open is current, with no version bump needed.
+    e.respondWith(
+      caches.match(e.request).then(hit => {
+        const fresh = fetch(e.request).then(res => {
+          if (res && res.ok && res.type === "basic") {
+            const copy = res.clone();
+            caches.open(SHELL).then(c => c.put(e.request, copy));
+          }
+          return res;
+        }).catch(() => hit);
+        return hit || fresh;
+      })
+    );
   }
 });
 

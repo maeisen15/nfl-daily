@@ -9,7 +9,7 @@ import { initTheme, renderScopes, renderTabs, renderStatus, scopeCodes } from ".
 import { renderFeed, watchSentinel, hydrateFeed } from "./views/feed.js";
 import { renderDetail, hydrateDetail } from "./views/detail.js";
 import { renderArticles } from "./views/articles.js";
-import { renderHome } from "./views/home.js";
+import { renderBrief } from "./views/brief.js";
 import { renderLiked, hydrateLiked } from "./views/liked.js";
 import { fetchTweets } from "./data.js";
 
@@ -83,7 +83,7 @@ function render(route = parse()) {
   switch (route.name) {
     case "tweet":    view = renderDetail(route.id, back); break;
     case "articles": view = renderArticles(store.scope); break;
-    case "home":     view = renderHome(store.scope); break;
+    case "brief":    view = renderBrief(store.scope); break;
     case "liked":    view = renderLiked(); break;
     default:         view = renderFeed(store.scope); break;
   }

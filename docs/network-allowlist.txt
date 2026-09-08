@@ -27,8 +27,8 @@ cbssports.com
 *.cbssports.com
 espn.com
 *.espn.com
-site.api.espn.com
-site.web.api.espn.com
+espncdn.com
+*.espncdn.com
 foxsports.com
 *.foxsports.com
 megaphone.fm
@@ -45,6 +45,8 @@ russellstreetreport.com
 *.russellstreetreport.com
 simplecast.com
 *.simplecast.com
+site.api.espn.com
+site.web.api.espn.com
 thebanner.com
 *.thebanner.com
 theringer.com

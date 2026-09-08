@@ -1,4 +1,4 @@
-/* The daily briefing. The pipeline writes markdown; this renders it as DOM.
+/* The daily brief. The pipeline writes markdown; this renders it as DOM.
  *
  * A deliberately small subset — headings, bullets, links, bold, italic — because that is all
  * the digest prompt emits, and a general markdown parser would be a much larger attack surface
@@ -8,16 +8,19 @@
 import { el, safeUrl } from "../lib/dom.js";
 import { digestFor, state } from "../data.js";
 
-export function renderHome(scope) {
+export function renderBrief(scope) {
   const markdown = digestFor(scope);
   const wrap = el("div");
   if (!markdown) {
     wrap.appendChild(el("div", { class: "empty",
-      text: "No briefing for this view yet. It's written once a day." }));
+      text: "No brief for this view yet. It's written once a day." }));
     return wrap;
   }
 
   for (const section of parseSections(markdown)) {
+    // Source Health is fetch diagnostics. The prompt no longer emits it, but a digest written
+    // before that change still carries one, and it must never reach the reader either way.
+    if (/source\s*health/i.test(section.title)) continue;
     const node = el("section", { class: "digest-section" }, el("h2", { text: section.title }));
     let list = null;
     for (const line of section.lines) {

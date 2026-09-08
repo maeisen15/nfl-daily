@@ -10,7 +10,7 @@ export function parse() {
   const params = new URLSearchParams(query || "");
   if (!parts.length) return { name: "tweets", params };
   if (parts[0] === "tweet" && parts[1]) return { name: "tweet", id: parts[1], params };
-  if (["tweets", "articles", "home", "liked"].includes(parts[0])) return { name: parts[0], params };
+  if (["tweets", "articles", "brief", "liked"].includes(parts[0])) return { name: parts[0], params };
   return { name: "tweets", params };
 }
 

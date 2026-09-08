@@ -544,30 +544,63 @@ main {
 
 /* ---------- articles ---------- */
 
+/* Three columns: the publisher's mark, the story, the picture. The mark shares the tweet row's
+   40px column so the two tabs read as one app. */
 .article {
   display: grid;
-  grid-template-columns: 1fr 96px;
-  gap: 12px;
+  grid-template-columns: var(--avatar) 1fr 72px;
+  column-gap: var(--gutter);
+  /* The mark and the picture sit centred against the headline, whatever height it runs to. */
+  align-items: center;
   padding: 12px var(--pad-x);
   border-bottom: 1px solid var(--line);
   color: inherit;
-  align-items: start;
 }
 .article:active { background: var(--bg-hover); }
-.article.no-image { grid-template-columns: 1fr; }
+.article.no-image { grid-template-columns: var(--avatar) 1fr; }
 
-.article-source { font-size: 13px; color: var(--muted); }
-.article-title { margin-top: 1px; font-weight: 700; overflow-wrap: anywhere; }
-.article-snippet {
-  margin-top: 3px;
+.article-logo {
+  width: var(--avatar);
+  height: var(--avatar);
+  border-radius: 8px;
+  object-fit: contain;
+  /* The icons are flattened onto white when fetched, so dark marks stay visible in every
+     theme and the tile reads as the publisher's own badge. */
+  background: #FFFFFF;
+  flex: none;
+}
+.article-logo-fallback {
+  display: grid;
+  place-items: center;
+  background: var(--bg-sunken);
   color: var(--muted);
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.article-mark {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.article-main { min-width: 0; }
+
+.article-title {
+  font-weight: 700;
+  overflow-wrap: anywhere;
   display: -webkit-box;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+/* The headline alone. A first-line preview said little that the headline didn't, and cost the
+   list the density that makes it scannable. */
+.article-time { font-size: 12px; line-height: 1; color: var(--muted); white-space: nowrap; }
+
 .article-thumb {
-  width: 96px; height: 96px;
+  width: 72px; height: 72px;
   border-radius: 10px;
   object-fit: cover;
   background: var(--bg-sunken);
