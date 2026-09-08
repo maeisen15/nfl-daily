@@ -203,11 +203,18 @@ function short(status) {
   return map[status] || status;
 }
 
-/* Wednesday for a Sunday game; a Thursday or Monday kickoff shifts the whole week. */
+/* Wednesday for a Sunday game; a Thursday or Monday kickoff shifts the whole week.
+ *
+ * Read in Eastern rather than on the device. The filing calendar belongs to the league, not to
+ * wherever the phone happens to be — from Tokyo a Sunday 1pm kickoff is Monday morning, and
+ * the device's own weekday would answer for the wrong game. */
 function waitingLine(data) {
   const kick = new Date(data.game?.date);
   if (isNaN(kick)) return "No injury report yet.";
-  const first = kick.getDay() === 4 ? "Monday" : kick.getDay() === 1 ? "Thursday" : "Wednesday";
+  const weekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York", weekday: "short",
+  }).format(kick);
+  const first = weekday === "Thu" ? "Monday" : weekday === "Mon" ? "Thursday" : "Wednesday";
   return `No injury report yet. First comes out ${first}.`;
 }
 
