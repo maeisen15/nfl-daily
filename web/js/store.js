@@ -56,7 +56,22 @@ export function findTweet(id) {
   return store.tweets.find(t => t.id === id)
       || store.pending.find(t => t.id === id)
       || (likes.all().find(e => e.id === id) || {}).tweet
+      || embedded(id)
       || null;
+}
+
+/* A quoted or retweeted post is not stored in its own right — it arrives attached to the post
+ * that referenced it. Tapping one has to find it there, or the card is a dead end. */
+function embedded(id) {
+  for (const t of store.tweets) {
+    if (t.quoted && t.quoted.id === id) return t.quoted;
+    if (t.retweeted && t.retweeted.id === id) return t.retweeted;
+  }
+  for (const t of store.pending) {
+    if (t.quoted && t.quoted.id === id) return t.quoted;
+    if (t.retweeted && t.retweeted.id === id) return t.retweeted;
+  }
+  return null;
 }
 
 /* Every tweet stored in the same conversation, oldest first — the thread, as far as we hold it.

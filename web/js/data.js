@@ -13,6 +13,7 @@ export const state = {
   config: null,
   feed: null,
   digest: null,
+  schedule: null,
   offline: false,
 };
 
@@ -27,6 +28,20 @@ export async function loadStatic() {
   state.feed = feed;
   state.digest = digest;
   return state;
+}
+
+/* The whole season is 125KB, which is not worth adding to every cold start for a tab that
+ * may never be opened. Fetched once on first visit and kept for the session; the hourly
+ * rebuild is picked up on the next app launch, which is soon enough for a schedule. */
+let schedulePromise = null;
+
+export function loadSchedule() {
+  if (!schedulePromise) {
+    schedulePromise = fetchJson(`data/schedule.json?v=${Date.now()}`)
+      .then(data => { state.schedule = data; return data; })
+      .catch(err => { schedulePromise = null; throw err; });
+  }
+  return schedulePromise;
 }
 
 async function fetchJson(url, opts) {

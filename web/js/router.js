@@ -10,7 +10,9 @@ export function parse() {
   const params = new URLSearchParams(query || "");
   if (!parts.length) return { name: "tweets", params };
   if (parts[0] === "tweet" && parts[1]) return { name: "tweet", id: parts[1], params };
-  if (["tweets", "articles", "brief", "liked", "settings"].includes(parts[0])) return { name: parts[0], params };
+  if (["tweets", "articles", "schedule", "brief", "liked", "settings"].includes(parts[0])) {
+    return { name: parts[0], params };
+  }
   return { name: "tweets", params };
 }
 
@@ -32,7 +34,16 @@ export function tabFor(route) {
 }
 
 export function key(route) {
-  return route.name === "tweet" ? `tweet:${route.id}` : route.name;
+  if (route.name === "tweet") return `tweet:${route.id}`;
+  if (route.name === "schedule") {
+    // Week paging deliberately shares one key so the list does not jump; the standings and a
+    // team's season are separate places and remember their own positions.
+    const team = route.params.get("team");
+    if (team) return `schedule:team:${team}`;
+    const view = route.params.get("view");
+    return view ? `schedule:${view}` : "schedule";
+  }
+  return route.name;
 }
 
 export function onRoute(fn) {

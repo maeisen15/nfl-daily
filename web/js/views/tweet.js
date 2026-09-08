@@ -343,6 +343,8 @@ export function hydrateClamps(root) {
       class: "show-more", text: "Show more",
       onclick: (e) => { e.stopPropagation(); node.classList.remove("clamped"); more.remove(); },
     });
-    node.after(more);
+    // Insert after the grid, not after the text inside it, or the button becomes a grid cell
+    // in the thumbnail's narrow column.
+    (node.closest(".quoted-inline") || node).after(more);
   }
 }

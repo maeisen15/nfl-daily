@@ -405,6 +405,7 @@ def build_items(run, primary_code, rival_codes, source_ranks=None):
                 "published_at": dt.isoformat(),
                 "author_handle": t.get("author_handle"),
                 "author_name": t.get("author_name"),
+                "author_avatar": t.get("author_avatar"),
                 "team": None,
                 "media": t.get("media") or [],
                 "quoted": t.get("quoted"),

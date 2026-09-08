@@ -8,14 +8,14 @@
  * and they would overwrite each other; and data.js already keeps its own ordered copy of the
  * newest tweets in localStorage. Letting the request fail is what hands the app to that copy.
  */
-const SHELL = "nfl-daily-shell-v13";
+const SHELL = "nfl-daily-shell-v14";
 const SHELL_FILES = [
   "index.html", "app.css", "manifest.webmanifest",
   "js/main.js", "js/data.js", "js/store.js", "js/router.js",
   "js/lib/dom.js", "js/lib/icons.js", "js/lib/time.js", "js/lib/likes.js",
   "js/views/chrome.js", "js/views/feed.js", "js/views/tweet.js", "js/views/detail.js",
   "js/views/articles.js", "js/views/brief.js", "js/views/liked.js", "js/views/lightbox.js",
-  "js/views/settings.js",
+  "js/views/settings.js", "js/views/schedule.js",
 ];
 
 self.addEventListener("install", (e) => {

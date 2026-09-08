@@ -348,6 +348,9 @@ main {
 .quoted-handle { color: var(--muted); overflow: hidden; text-overflow: ellipsis; flex-shrink: 1000000; min-width: 0; }
 
 .quoted-text { padding: 2px 12px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+/* The clamp toggle is inserted after the text, not inside it, so it has to be inset to match
+   the card rather than sitting against the border. */
+.quoted > .show-more { padding: 0 12px 12px; margin-top: -6px; }
 .quoted-text.clamped { display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* A quoted tweet carrying one image renders as a small square thumbnail beside the text, not
@@ -728,3 +731,108 @@ main {
 .usage-status { text-align: right; font-size: 12px; font-weight: 700; }
 .usage-status.is-warn { color: #B58900; }
 .usage-status.is-error, .usage-status.is-fail { color: #D93025; }
+
+/* ---------- schedule ---------- */
+
+.sched-loading { padding: 24px var(--pad-x); color: var(--muted); }
+.sched-empty { padding: 24px var(--pad-x); color: var(--muted); text-align: center; }
+.sched-allgames { display: block; text-align: center; padding: 0 0 20px; color: var(--accent); }
+
+.sched-tabs { display: flex; border-bottom: 1px solid var(--line); }
+.sched-tab {
+  flex: 1; text-align: center; padding: 13px 0; font-weight: 600;
+  color: var(--muted); position: relative;
+}
+.sched-tab.is-active { color: var(--text); font-weight: 800; }
+.sched-tab.is-active::after {
+  content: ""; position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: 0; width: 56px; height: 3px; border-radius: 2px; background: var(--accent);
+}
+
+.sched-nav {
+  display: grid; grid-template-columns: 44px 1fr 44px; align-items: center;
+  padding: 12px var(--pad-x); border-bottom: 1px solid var(--line);
+}
+.sched-arrow {
+  font-size: 26px; line-height: 1; text-align: center; color: var(--text);
+  min-height: 44px; display: flex; align-items: center; justify-content: center;
+}
+.sched-arrow.is-off { color: var(--line); }
+.sched-week {
+  text-align: center; font-weight: 800; font-size: 17px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+}
+
+.sched-day {
+  padding: 14px var(--pad-x) 6px; font-size: 13px; font-weight: 700;
+  color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em;
+}
+
+.sched-game {
+  display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 12px;
+  padding: 10px var(--pad-x); border-bottom: 1px solid var(--line); color: var(--text);
+}
+.sched-teams { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.sched-side {
+  display: grid; grid-template-columns: 24px 1fr auto 30px;
+  align-items: center; gap: 8px; min-width: 0;
+}
+.sched-side { color: inherit; border-radius: 6px; }
+.sched-side:active { background: var(--bg-hover); }
+.sched-side.is-lost { color: var(--muted); }
+.sched-side.is-lost .team-logo { opacity: 0.55; }
+.sched-team {
+  font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sched-record { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.sched-score {
+  text-align: right; font-weight: 800; font-size: 17px; font-variant-numeric: tabular-nums;
+}
+.sched-meta { text-align: right; display: flex; flex-direction: column; gap: 3px; }
+.sched-status { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.sched-status.is-live { color: #E0245E; font-weight: 700; }
+.sched-network { font-size: 11px; font-weight: 700; color: var(--muted); letter-spacing: 0.03em; }
+
+.team-logo { width: 24px; height: 24px; object-fit: contain; display: block; }
+.team-logo.is-blank {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 800; color: var(--muted);
+  background: var(--line); border-radius: 4px;
+}
+.sched-week .team-logo { width: 28px; height: 28px; }
+
+.sched-fixture {
+  display: grid; grid-template-columns: 66px 24px 24px 1fr auto;
+  align-items: center; gap: 8px; padding: 11px var(--pad-x);
+  border-bottom: 1px solid var(--line); color: var(--text);
+}
+.fixture-week { color: var(--muted); font-size: 13px; }
+.fixture-side { color: var(--muted); font-size: 13px; }
+.fixture-team {
+  font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.fixture-result { font-variant-numeric: tabular-nums; font-size: 14px; color: var(--muted); }
+.fixture-when { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.fixture-date { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.fixture-time { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.fixture-net { font-size: 10px; font-weight: 700; color: var(--muted); letter-spacing: 0.03em; }
+.fixture-result.is-win { color: var(--text); font-weight: 700; }
+.fixture-result.is-loss { color: var(--muted); font-weight: 700; }
+
+.standings-head {
+  display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 12px;
+  padding: 16px var(--pad-x) 6px; font-size: 13px; font-weight: 800;
+  color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em;
+}
+.standings-row {
+  display: grid; grid-template-columns: 24px 1fr auto; align-items: center; gap: 10px;
+  padding: 9px var(--pad-x); border-bottom: 1px solid var(--line); color: var(--text);
+}
+.standings-team {
+  font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.standings-cols {
+  display: grid; grid-template-columns: repeat(3, 26px) 44px;
+  text-align: right; font-variant-numeric: tabular-nums; font-size: 14px;
+}
+.standings-head .standings-cols { font-size: 11px; }

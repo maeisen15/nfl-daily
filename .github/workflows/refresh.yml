@@ -58,6 +58,12 @@ jobs:
           NFL_DAILY_WORKER_URL: ${{ secrets.NFL_DAILY_WORKER_URL }}
         run: python3 pipeline/publish.py
 
+      # Scores and standings move on their own schedule, and a failure here must not cost the
+      # run its articles: the deploy carries the previous schedule.json rather than no app.
+      - name: Refresh schedule and scores
+        continue-on-error: true
+        run: python3 pipeline/schedule.py
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

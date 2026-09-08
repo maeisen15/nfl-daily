@@ -12,6 +12,7 @@ import { renderArticles } from "./views/articles.js";
 import { renderBrief } from "./views/brief.js";
 import { renderLiked, hydrateLiked } from "./views/liked.js";
 import { renderSettings } from "./views/settings.js";
+import { renderSchedule } from "./views/schedule.js";
 import { fetchTweets } from "./data.js";
 
 const main = document.getElementById("main");
@@ -86,6 +87,7 @@ function render(route = parse()) {
   switch (route.name) {
     case "tweet":    view = renderDetail(route.id, back); break;
     case "articles": view = renderArticles(store.scope); break;
+    case "schedule": view = renderSchedule(route.params); break;
     case "brief":    view = renderBrief(store.scope); break;
     case "liked":    view = renderLiked(); break;
     case "settings": view = renderSettings(); break;
@@ -124,6 +126,9 @@ function changeScope(code) {
   renderScopes(changeScope);
   const route = parse();
   if (route.name === "tweet") go("/tweets");
+  // A team's season belongs to the team, not the scope you were in when you opened it, so
+  // changing scope leaves it rather than showing the Ravens under a Rivals heading.
+  else if (route.name === "schedule" && route.params.get("team")) go("/schedule");
   else render(route);
 }
 
