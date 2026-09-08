@@ -67,6 +67,8 @@ export default {
         case "GET /tweets":  return await getTweets(request, env, url, origin);
         case "GET /health":  return await health(env, origin);
         case "GET /usage":   return await usage(env, url, origin);
+        case "GET /injuries": return await getInjuries(env, url, origin);
+        case "POST /injuries": return await putInjuries(request, env);
         default:
           return json({ error: "not found" }, 404, env, origin);
       }
@@ -614,6 +616,100 @@ function daysInMonth(month) {
 
 function round4(n) {
   return Math.round(n * 10000) / 10000;
+}
+
+/* ---------- injury reports ---------- */
+
+const INJURY_KEEP_DAYS = 30;
+const INJURY_BATCH = 50;
+
+/* A day's snapshot from the pipeline. Replaces that day rather than adding to it, so a rerun
+ * corrects the day instead of leaving yesterday's answer beside today's. */
+async function putInjuries(request, env) {
+  const auth = request.headers.get("Authorization") || "";
+  const token = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+  if (!timingSafeEqual(token, env.PUSH_SECRET || "")) {
+    return json({ error: "unauthorized" }, 401, env, "");
+  }
+  const body = await request.json().catch(() => null);
+  const day = body && String(body.day || "");
+  const rows = body && Array.isArray(body.rows) ? body.rows : null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day || "") || !rows) {
+    return json({ error: "expected {day: YYYY-MM-DD, rows: []}" }, 400, env, "");
+  }
+  // An empty day is never written. Out of season the page is blank, and storing that would
+  // erase a grid that is still the current one.
+  if (!rows.length) return json({ ok: true, day, stored: 0, skipped: "empty" }, 200, env, "");
+
+  const teams = [...new Set(rows.map(r => String(r.team || "")).filter(Boolean))];
+  for (let i = 0; i < teams.length; i += 20) {
+    const slice = teams.slice(i, i + 20);
+    await env.DB.prepare(
+      `DELETE FROM injury_reports WHERE day = ? AND team IN (${slice.map(() => "?").join(",")})`
+    ).bind(day, ...slice).run();
+  }
+
+  let stored = 0;
+  for (let i = 0; i < rows.length; i += INJURY_BATCH) {
+    const slice = rows.slice(i, i + INJURY_BATCH);
+    await env.DB.batch(slice.map(r => env.DB.prepare(
+      `INSERT INTO injury_reports (day, team, player, position, injury, practice, status)
+       VALUES (?,?,?,?,?,?,?)
+       ON CONFLICT(day, team, player) DO UPDATE SET
+         position = excluded.position, injury = excluded.injury,
+         practice = excluded.practice, status = excluded.status`
+    ).bind(day, String(r.team || ""), String(r.player || ""), str(r.position),
+           str(r.injury), str(r.practice), str(r.status))));
+    stored += slice.length;
+  }
+
+  await env.DB.prepare("DELETE FROM injury_reports WHERE day < ?")
+    .bind(isoDaysAgo(INJURY_KEEP_DAYS).slice(0, 10)).run();
+
+  return json({ ok: true, day, stored, teams: teams.length }, 200, env, "");
+}
+
+/* The week assembled: one row per player, with a column for each day that has a report. */
+async function getInjuries(env, url, origin) {
+  const teams = (url.searchParams.get("teams") || "")
+    .split(",").map(t => t.trim().toUpperCase()).filter(Boolean).slice(0, 8);
+  if (!teams.length) return json({ error: "teams= required" }, 400, env, origin);
+  const days = Math.min(21, Math.max(1, Number(url.searchParams.get("days")) || 8));
+  const since = isoDaysAgo(days).slice(0, 10);
+
+  const res = await env.DB.prepare(
+    `SELECT day, team, player, position, injury, practice, status
+       FROM injury_reports
+      WHERE day >= ? AND team IN (${teams.map(() => "?").join(",")})
+      ORDER BY team, player, day`
+  ).bind(since, ...teams).all();
+
+  const seenDays = new Set();
+  const byTeam = {};
+  for (const r of res.results || []) {
+    seenDays.add(r.day);
+    const team = (byTeam[r.team] ||= new Map());
+    let entry = team.get(r.player);
+    if (!entry) {
+      entry = { player: r.player, position: r.position, injury: r.injury,
+                practice: {}, status: "" };
+      team.set(r.player, entry);
+    }
+    if (r.practice) entry.practice[r.day] = r.practice;
+    // The later day wins: a designation is set on Friday and supersedes a blank Wednesday.
+    if (r.status) entry.status = r.status;
+    if (r.injury) entry.injury = r.injury;
+    if (r.position) entry.position = r.position;
+  }
+
+  return json({
+    days: [...seenDays].sort(),
+    teams: Object.fromEntries(teams.map(t => [t, [...(byTeam[t] || new Map()).values()]])),
+  }, 200, env, origin, { "Cache-Control": "public, max-age=300" });
+}
+
+function str(v) {
+  return v == null ? "" : String(v);
 }
 
 /* ---------- link preview cards ---------- */

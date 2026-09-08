@@ -68,6 +68,8 @@ def main() -> int:
                     help="Backfill window for --mode search. Defaults to the store watermark.")
     ap.add_argument("--dry-run", action="store_true", help="Fetch and report; push nothing.")
     ap.add_argument("--dump", help="Also write the raw tweets to this JSON path.")
+    ap.add_argument("--only", help="Comma-separated handles to backfill instead of all of "
+                                   "them. A new handle costs a fraction of a full sweep.")
     args = ap.parse_args()
 
     api_key = load_secret("TWITTERAPI_IO_KEY")
@@ -106,6 +108,15 @@ def main() -> int:
     print(f"search watermark: {since.isoformat()} "
           f"({(datetime.now(timezone.utc) - since).total_seconds() / 3600:.1f}h back)",
           file=sys.stderr)
+    if args.only:
+        wanted = {h.strip().lower().lstrip("@") for h in args.only.split(",") if h.strip()}
+        handles = [h for h in handles if h["handle"].lower() in wanted]
+        missing = wanted - {h["handle"].lower() for h in handles}
+        if missing:
+            print(f"ERROR: not in sources.yaml: {', '.join(sorted(missing))}", file=sys.stderr)
+            return 1
+        print(f"backfilling only: {', '.join(h['handle'] for h in handles)}", file=sys.stderr)
+
     tweets, requests_made = sweep_search(api_key, handles, since)
 
     unique = dedupe(tweets)
@@ -162,7 +173,43 @@ def load_handles() -> list[dict[str, Any]]:
         for tw in rival.get("twitter_handles") or []:
             add(tw, "rivals")
 
-    return out
+    opponent = upcoming_opponent(primary_code)
+    writer = (cfg.get("team_beat_writers") or {}).get(opponent) if opponent else None
+    if writer and writer.get("handle"):
+        # Scope `opponent` is deliberately not a tab: no feed filters on it, so these tweets
+        # reach the game-week dossier without turning up in the Ravens feed. One handle at a
+        # time, and it changes itself when the schedule does.
+        add({**writer, "feed_only": True}, "opponent")
+
+    seen: set[str] = set()
+    deduped = []
+    for h in out:
+        key = h["handle"].lower()
+        # A rival already watched year-round must not be added twice when they are also this
+        # week's opponent — the poll query would ask for them in both halves.
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(h)
+    return deduped
+
+
+def upcoming_opponent(primary_code: str) -> str | None:
+    """Who the primary team plays next, read from the schedule this app already fetches."""
+    path = REPO_ROOT / "web" / "data" / "schedule.json"
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    for week in data.get("weeks") or []:
+        for game in week.get("games") or []:
+            home = (game.get("home") or {}).get("abbr")
+            away = (game.get("away") or {}).get("abbr")
+            if primary_code not in (home, away):
+                continue
+            if game.get("state") != "post":
+                return away if home == primary_code else home
+    return None
 
 
 def build_queries(handles: list[dict[str, Any]], since: datetime) -> list[str]:

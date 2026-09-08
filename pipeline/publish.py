@@ -487,18 +487,21 @@ def build_digest(run, primary, rivals):
         tabs.append({"scope": primary.get("team_code", "BAL"),
                      "label": primary.get("display_name", "Ravens"),
                      "markdown": outputs["ravens"]["full_markdown"]})
-    # One Rivals tab, not one per team. Each team keeps its own section inside it, ordered the
-    # way sources.yaml lists them so the tab doesn't reshuffle as teams have quiet weeks.
-    rival_names = {r.get("team_code"): r.get("display_name") for r in rivals}
-    order = [r.get("team_code") for r in rivals]
+    # One combined Rivals brief, with sections shared across every team rather than a section
+    # per team: it is read to catch up on all of them at once, so importance orders it better
+    # than team does.
     rival_outputs = outputs.get("rivals") or {}
-    sections = []
-    for code in order:
-        markdown = (rival_outputs.get(code) or {}).get("full_markdown")
-        if markdown:
-            sections.append(retitle_sections(markdown, rival_names.get(code, code)))
-    if sections:
-        tabs.append({"scope": RIVALS_SCOPE, "label": "Rivals", "markdown": "\n\n".join(sections)})
+    markdown = rival_outputs.get("full_markdown")
+    if not markdown:
+        # A digest written before the prompt was combined arrives keyed by team code. Fold it
+        # rather than dropping it, so a stale digest still renders.
+        names = {r.get("team_code"): r.get("display_name") for r in rivals}
+        parts = [retitle_sections(out["full_markdown"], names.get(code, code))
+                 for code, out in rival_outputs.items()
+                 if isinstance(out, dict) and out.get("full_markdown")]
+        markdown = "\n\n".join(parts)
+    if markdown:
+        tabs.append({"scope": RIVALS_SCOPE, "label": "Rivals", "markdown": markdown})
     return tabs
 
 

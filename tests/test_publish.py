@@ -232,6 +232,33 @@ check("plain text is untouched", publish.clean_text("no entities here") == "no e
 check("None passes through", publish.clean_text(None) is None)
 check("control characters stripped", "\x00" not in publish.clean_text("bad\x00char"))
 
+# ---------- rivals digest ----------
+print("rivals digest:")
+RIVALS = [{"team_code": "PIT", "display_name": "Pittsburgh Steelers"},
+          {"team_code": "CIN", "display_name": "Cincinnati Bengals"}]
+
+combined = publish.build_digest(
+    {"digest_outputs": {"rivals": {"full_markdown": "## Summary\n- Steelers thing"}}},
+    {"team_code": "BAL", "display_name": "Baltimore Ravens"}, RIVALS)
+check("a combined rivals brief becomes one tab",
+      len(combined) == 1 and combined[0]["scope"] == "rivals"
+      and combined[0]["markdown"] == "## Summary\n- Steelers thing")
+
+# A digest written before the prompt was combined is keyed by team code. It must still render.
+legacy = publish.build_digest(
+    {"digest_outputs": {"rivals": {
+        "PIT": {"full_markdown": "# Steelers\n\n## Summary\n- a"},
+        "CIN": {"full_markdown": "# Bengals\n\n## Summary\n- b"}}}},
+    {"team_code": "BAL", "display_name": "Baltimore Ravens"}, RIVALS)
+check("a per-team rivals digest still folds into one tab", len(legacy) == 1)
+check("folded sections name their team",
+      "## Pittsburgh Steelers \u00b7 Summary" in legacy[0]["markdown"]
+      and "## Cincinnati Bengals \u00b7 Summary" in legacy[0]["markdown"])
+check("no rivals output yields no rivals tab",
+      publish.build_digest({"digest_outputs": {"rivals": {}}},
+                           {"team_code": "BAL"}, RIVALS) == [])
+
+
 # ---------- digest preservation ----------
 # The hourly refresh publishes runs that carry no digest_outputs. If those rewrote digest.json
 # the Home tab would blank between synthesis runs, so build_digest must yield nothing and let

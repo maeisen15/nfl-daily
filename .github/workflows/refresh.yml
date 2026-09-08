@@ -58,11 +58,35 @@ jobs:
           NFL_DAILY_WORKER_URL: ${{ secrets.NFL_DAILY_WORKER_URL }}
         run: python3 pipeline/publish.py
 
-      # Scores and standings move on their own schedule, and a failure here must not cost the
-      # run its articles: the deploy carries the previous schedule.json rather than no app.
+      # These three run after publish and never block the deploy: a failure here costs the app
+      # a section, where a failure that stopped the job would cost it the articles too. Each
+      # depends on the one before — injuries needs the schedule's team names, and the dossier
+      # needs both.
       - name: Refresh schedule and scores
         continue-on-error: true
         run: python3 pipeline/schedule.py
+
+      # The opponent's beat writer joins the poll for the week they matter, so the handle list
+      # has to be resynced once the schedule says who that is. Costs nothing.
+      - name: Sync watched handles
+        continue-on-error: true
+        env:
+          NFL_DAILY_WORKER_URL: ${{ secrets.NFL_DAILY_WORKER_URL }}
+          NFL_DAILY_PUSH_SECRET: ${{ secrets.NFL_DAILY_PUSH_SECRET }}
+        run: python3 pipeline/tweets.py --mode sync-handles
+
+      - name: Snapshot practice reports
+        continue-on-error: true
+        env:
+          NFL_DAILY_WORKER_URL: ${{ secrets.NFL_DAILY_WORKER_URL }}
+          NFL_DAILY_PUSH_SECRET: ${{ secrets.NFL_DAILY_PUSH_SECRET }}
+        run: python3 pipeline/injuries.py
+
+      - name: Build the game-week dossier
+        continue-on-error: true
+        env:
+          NFL_DAILY_WORKER_URL: ${{ secrets.NFL_DAILY_WORKER_URL }}
+        run: python3 pipeline/gameweek.py
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

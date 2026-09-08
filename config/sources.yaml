@@ -505,5 +505,52 @@ team_coverage:
           enabled: true
           feed: true
 
+# ---- Beat writers, one per team ------------------------------------------------------------
+# The reporter who files practice reports, injury news and roster moves for each team.
+#
+# These are NOT all polled. Each week the Ravens' upcoming opponent is looked up in
+# web/data/schedule.json and only that team's writer joins the poll, under the scope
+# `opponent` — which no tab filters on, so their tweets feed the game-week dossier without
+# turning up in a feed. One extra handle at a time, rotating on its own.
+#
+# The five teams under `rivals` are polled year-round and listed there instead.
+#
+# A writer who changes jobs keeps their handle and stops covering the team, which nothing
+# detects: scripts/verify_handles.py proves an account exists, not that it still works the
+# beat. Worth a glance each preseason.
+
+team_beat_writers:
+  ARI: { handle: "azbobbymac",       name: "Bob McManaman (azcentral)" }
+  ATL: { handle: "ByDanielFlick",    name: "Daniel Flick (AJC)" }
+  BUF: { handle: "JoeBuscaglia",     name: "Joe Buscaglia (The Athletic)" }
+  CAR: { handle: "josephperson",     name: "Joe Person (The Athletic)" }
+  CHI: { handle: "adamjahns",        name: "Adam Jahns (The Athletic)" }
+  CIN: { handle: "pauldehnerjr",     name: "Paul Dehner Jr. (The Athletic)" }
+  CLE: { handle: "MaryKayCabot",     name: "Mary Kay Cabot (cleveland.com)" }
+  DAL: { handle: "jonmachota",       name: "Jon Machota (The Athletic)" }
+  DEN: { handle: "NickKosmider",     name: "Nick Kosmider (The Athletic)" }
+  DET: { handle: "nickbaumgardner",  name: "Nick Baumgardner (The Athletic)" }
+  GB:  { handle: "mattschneidman",   name: "Matt Schneidman (The Athletic)" }
+  HOU: { handle: "AaronWilson_NFL",  name: "Aaron Wilson (KPRC)" }
+  IND: { handle: "HolderStephen",    name: "Stephen Holder (ESPN)" }
+  JAX: { handle: "MiaOBrienTV",      name: "Mia O'Brien" }
+  KC:  { handle: "ByNateTaylor",     name: "Nate Taylor (ESPN)" }
+  LAC: { handle: "danielpopper",     name: "Daniel Popper (The Athletic)" }
+  LAR: { handle: "JourdanRodrigue",  name: "Jourdan Rodrigue (The Athletic)" }
+  LV:  { handle: "VicTafur",         name: "Vic Tafur (The Athletic)" }
+  MIA: { handle: "OmarKelly",        name: "Omar Kelly" }
+  MIN: { handle: "alec_lewis",       name: "Alec Lewis (The Athletic)" }
+  NE:  { handle: "ChadGraff",        name: "Chad Graff (The Athletic)" }
+  NO:  { handle: "Kat_Terrell",      name: "Katherine Terrell (ESPN)" }
+  NYG: { handle: "DDuggan21",        name: "Dan Duggan (The Athletic)" }
+  NYJ: { handle: "ZackBlatt",        name: "Zack Rosenblatt (The Athletic)" }
+  PHI: { handle: "ZBerm",            name: "Zach Berman (The Athletic)" }
+  PIT: { handle: "FarabaughFB",      name: "Nick Farabaugh (PennLive)" }
+  SEA: { handle: "MikeDugar",        name: "Michael-Shawn Dugar (The Athletic)" }
+  SF:  { handle: "mattbarrows",      name: "Matt Barrows (The Athletic)" }
+  TB:  { handle: "gregauman",        name: "Greg Auman (The Athletic)" }
+  TEN: { handle: "joerexrode",       name: "Joe Rexrode (The Athletic)" }
+  WSH: { handle: "BenStandig",       name: "Ben Standig (The Athletic)" }
+
 # ---- Recency window -----------------------------------------------------------------------
 recency_hours_cap: 48              # items older than this are dropped at synthesis time

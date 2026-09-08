@@ -7,13 +7,22 @@
 
 import { el, safeUrl } from "../lib/dom.js";
 import { digestFor, state } from "../data.js";
+import { renderDossier } from "./dossier.js";
 
 export function renderBrief(scope) {
   const markdown = digestFor(scope);
   const wrap = el("div");
+
+  // The game-week dossier leads the Ravens brief: it is current to the hour, where the written
+  // summary below it is a day old by design.
+  const dossier = renderDossier(scope);
+  if (dossier) wrap.appendChild(dossier);
+
   if (!markdown) {
     wrap.appendChild(el("div", { class: "empty",
-      text: "No brief for this view yet. It's written once a day." }));
+      text: dossier
+        ? "The written brief is added once a day."
+        : "No brief for this view yet. It's written once a day." }));
     return wrap;
   }
 

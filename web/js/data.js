@@ -13,21 +13,39 @@ export const state = {
   config: null,
   feed: null,
   digest: null,
+  gameweek: null,
   schedule: null,
   offline: false,
 };
 
 export async function loadStatic() {
   const bust = `?v=${Date.now()}`;
-  const [config, feed, digest] = await Promise.all([
+  const [config, feed, digest, gameweek] = await Promise.all([
     fetchJson(`data/config.json${bust}`),
     fetchJson(`data/feed.json${bust}`),
     fetchJson(`data/digest.json${bust}`),
+    // Small, and the Brief opens on it — but the app has to work before this file has ever
+    // been written, so its absence is a missing section rather than a failed boot.
+    fetchJson(`data/gameweek.json${bust}`).catch(() => null),
   ]);
   state.config = config;
   state.feed = feed;
   state.digest = digest;
+  state.gameweek = gameweek;
   return state;
+}
+
+/* This week's opponent beat writer, scoped so it never appears in a feed. Fetched when the
+ * Brief is opened rather than baked into gameweek.json, which every app launch loads. */
+export async function fetchOpponentTweets(limit = 30) {
+  const base = (state.config?.tweets_url || "").replace(/\/$/, "");
+  if (!base) return [];
+  const url = new URL(`${base}/tweets`);
+  url.searchParams.set("scope", "opponent");
+  url.searchParams.set("hours", "168");
+  url.searchParams.set("limit", String(limit));
+  const body = await fetchJson(url.toString());
+  return Array.isArray(body.items) ? body.items : [];
 }
 
 /* The whole season is 125KB, which is not worth adding to every cold start for a tab that

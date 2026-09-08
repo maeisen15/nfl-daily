@@ -836,3 +836,104 @@ main {
   text-align: right; font-variant-numeric: tabular-nums; font-size: 14px;
 }
 .standings-head .standings-cols { font-size: 11px; }
+
+/* ---------- game-week dossier ---------- */
+
+.dossier-section { padding: 16px var(--pad-x); border-bottom: 1px solid var(--line); }
+.dossier-section h2 {
+  font-size: 13px; font-weight: 800; margin: 0 0 12px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.dossier-note { color: var(--muted); font-size: 13px; line-height: 18px; margin-top: 10px; }
+
+.dossier-head { padding: 18px var(--pad-x); border-bottom: 1px solid var(--line); text-align: center; }
+.dossier-week {
+  font-size: 12px; font-weight: 800; color: var(--accent);
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.dossier-matchup {
+  display: flex; align-items: flex-start; justify-content: center; gap: 16px; margin: 12px 0 10px;
+}
+.dossier-team { display: flex; flex-direction: column; align-items: center; gap: 4px; width: 108px; }
+.dossier-logo { width: 46px; height: 46px; object-fit: contain; }
+.dossier-name { font-weight: 800; font-size: 16px; }
+.dossier-record { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.dossier-at { color: var(--muted); font-size: 13px; padding-top: 20px; }
+.dossier-when { display: flex; align-items: baseline; justify-content: center; gap: 8px; font-size: 14px; }
+.dossier-net { font-size: 11px; font-weight: 800; color: var(--muted); letter-spacing: 0.03em; }
+.dossier-venue { margin-top: 3px; font-size: 12px; color: var(--muted); }
+
+.wx { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; }
+.wx-value { font-size: 26px; font-weight: 800; letter-spacing: -0.02em; }
+.wx-label { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+.cmp-head, .cmp-row {
+  display: grid; grid-template-columns: 1fr 96px 1fr; align-items: baseline; gap: 8px;
+}
+.cmp-head { padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.cmp-side { font-weight: 800; font-size: 13px; text-align: center; }
+.cmp-group {
+  padding: 12px 0 6px; font-size: 11px; font-weight: 800; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.05em; text-align: center;
+}
+.cmp-row { padding: 6px 0; }
+.cmp-label { text-align: center; font-size: 12px; color: var(--muted); }
+.cmp-cell { text-align: center; display: flex; flex-direction: column; gap: 1px; }
+.cmp-value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.cmp-rank { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.cmp-cell.is-best .cmp-value { color: var(--accent); }
+.cmp-cell.is-best .cmp-rank { color: var(--accent); font-weight: 700; }
+
+.inj-team {
+  display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 14px;
+  margin: 14px 0 8px;
+}
+.inj-team:first-child { margin-top: 0; }
+.inj-logo { width: 22px; height: 22px; object-fit: contain; }
+/* Deliberately dense — the team posts this as a single graphic you take in at a glance, and a
+   report that needs scrolling is a different, worse thing. */
+.inj { display: flex; flex-direction: column; }
+.inj-row {
+  display: grid; grid-template-columns: 1fr repeat(var(--inj-days, 3), 20px) 30px;
+  align-items: baseline; gap: 6px; padding: 3px 0; border-top: 1px solid var(--line);
+}
+.inj-row.is-head {
+  border-top: 0; padding-bottom: 2px;
+  font-size: 9px; font-weight: 800; color: var(--muted); letter-spacing: 0.03em;
+}
+.inj-player { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inj-pos {
+  display: inline-block; min-width: 22px;
+  font-size: 10px; font-weight: 800; color: var(--muted);
+}
+.inj-name { font-weight: 600; font-size: 13px; }
+.inj-detail { font-size: 11px; color: var(--muted); margin-left: 5px; }
+.inj-day { text-align: center; font-size: 11px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.inj-day.is-dnp { color: #D93025; }
+.inj-day.is-limited { color: #B58900; }
+.inj-day.is-full { color: var(--muted); font-weight: 400; }
+.inj-day.is-none { color: var(--line-strong); font-weight: 400; }
+.inj-status { text-align: right; font-size: 11px; font-weight: 800; color: #D93025; }
+.inj-team { font-size: 13px; }
+
+.opp-news { display: flex; flex-direction: column; }
+.opp-item {
+  padding: 10px 0; border-top: 1px solid var(--line); color: var(--text);
+  font-size: 14px; line-height: 19px;
+}
+.opp-item:first-child { border-top: 0; }
+
+/* The opponent's beat writer, in a box you scroll inside so the rest of the dossier stays a
+   thumb away rather than a page down. */
+.beat-who { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+.beat-scroll {
+  max-height: 420px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+}
+.beat-scroll .tweet { padding-left: 12px; padding-right: 12px; }
+.beat-scroll .tweet:last-child { border-bottom: 0; }
+.beat-loading { padding: 20px 12px; color: var(--muted); font-size: 13px; }

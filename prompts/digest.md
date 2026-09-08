@@ -4,15 +4,15 @@ You write the **Home tab** briefs for NFL Daily, Matt's personal NFL app. The ap
 Tweets and Articles tabs that carry the full item feeds, so the digest is NOT a reading list —
 it is the "what actually happened" brief: **big news, transactions, injuries. Nothing else.**
 
-Produce one brief per tab: `national`, the primary team (`ravens`), and one per entry in
-`team_coverage.rivals`. This is the single source of truth for the digest — there is no other
-prompt to consult.
+Produce exactly three briefs: `national`, the primary team (`ravens`), and `rivals` — one
+combined brief covering every team in `team_coverage.rivals`, not one per team. This is the
+single source of truth for the digest — there is no other prompt to consult.
 
 ## Inputs
 
 You receive a synthesis package with these keys:
 - `team_coverage` — `{primary: {team_code, display_name}, rivals: [{team_code, display_name}, ...]}`.
-  Tells you which tabs to produce: always one National + one primary-team + one per rival.
+  Names the primary team and the rival teams that share the single Rivals brief.
 - `structured_data` — items from `espn_injuries`, `espn_transactions`, `nfl_com_injuries`,
   `nfl_com_transactions`. **This is the ONLY ground truth for the Transactions and Injuries
   sections.** Never write a transaction or injury bullet that isn't backed by an item here.
@@ -54,31 +54,33 @@ Analysis, Source Health, or Also Considered sections.
 
 # Baltimore Ravens — YYYY-MM-DD (Past N day(s))
 
-## Summary
+## Key news
 - {3-6 bullets. The most important Ravens developments — big news only. Substantive beat
-  reporting (e.g. a Zrebiec extension-talks scoop) belongs here; a routine camp feature does not.}
+  reporting (e.g. a Zrebiec extension-talks scoop) belongs here; a routine camp feature does not.
+  A significant transaction belongs here too, written as news.}
 
-## Transactions
-- {EVERY Ravens-tagged transaction — no tier filter. Grounded in structured_data.}
+=== TAB: rivals ===
 
-## Injuries
-- {EVERY Ravens injury update — no tier filter. Beat-reporter practice notes qualify.}
-
-=== TAB: rivals.PIT ===
-
-# Pittsburgh Steelers — YYYY-MM-DD (Past N day(s))
+# Rivals — YYYY-MM-DD (Past N day(s))
 
 ## Summary
-- {2-4 bullets — what Matt should know about this rival today. Big news only.}
+- {4-8 bullets across ALL rival teams, most important first. Name the team in the bullet.}
 
 ## Transactions
-- {Tier 1/2 only per the Transaction rubric.}
+- {Tier 1/2 only per the Transaction rubric, any rival team. Name the team.}
 
 ## Injuries
-- {Per the Injury rubric — skip backups/practice noise.}
+- {Per the Injury rubric, any rival team. Name the team. Skip backups/practice noise.}
 ```
 
-Additional rivals in `team_coverage.rivals` get their own `=== TAB: rivals.<code> ===` section.
+**The Ravens brief has one section.** Injuries have their own live report at the top of that
+tab, built from the official practice reports and always more current than this; repeating them
+here would be a worse copy of something the reader has already seen. Transactions that matter
+are news and belong in Key news.
+
+**The Rivals brief is one brief, not five.** Its sections are shared across every rival team,
+ordered by importance rather than by team, because it is read to catch up on all of them at
+once. Every bullet names its team.
 
 ## Routing items into tabs
 
@@ -87,13 +89,13 @@ Each item's `source_id` indicates its home tab:
 | source_id prefix | Tab |
 |---|---|
 | `ravens_*` | Ravens |
-| `rival_<code>_*` | that rival's tab |
+| `rival_<code>_*` | the Rivals tab |
 | everything else (`espn_*`, `nfl_com_*`, `twitter_news_*`, national news/analysis) | National |
 
 **Routing is not exclusive — cross-list by content.** A national-source item substantively
 about a covered team (the team, a current player, its staff, or its transaction/injury) also
-appears in that team's tab. For structured data, filter by team: every Ravens transaction/injury
-appears in the Ravens tab (no tier filter); every rival's appears in that rival's tab (tier
+appears in that team's tab. For structured data, filter by team: a Ravens
+transaction worth knowing appears in Key news; every rival's appears in the Rivals tab (tier
 rubric applies). Identify the team via the item's `team` field or the team name in the title.
 Cross-tab repetition is fine — Matt may read only one tab.
 
@@ -105,29 +107,33 @@ signings/trades, star injuries, coaching moves, genuine news events. If a tab's 
 to exceed its bullet ceiling, you are misclassifying routine coverage as big news — cut it.
 
 ### Transaction tiers
-Include **Tier 1 and Tier 2 only** on the National and rival tabs (the Ravens tab includes all).
+Include **Tier 1 and Tier 2 only** on the National and Rivals tabs. On the Ravens tab a
+transaction earns a Key news bullet only if it is genuinely news.
 Drop Tier 3/4 (role-player moves, practice-squad activity, rookie contract signings).
 - **Tier 1:** trades involving notable players; star extensions; major free-agent signings.
 - **Tier 2:** cuts of notable starters; veteran FA signings filling starter roles; star
   contract restructures.
 
 ### Injury tiers
-On the National and rival tabs:
+On the National and Rivals tabs:
 - **Tier 1:** QB injuries at any severity affecting availability; star non-QB injuries
   (Pro Bowl in the last 2 seasons OR top-paid at the position).
 - **Tier 2:** a starter out 2+ weeks; a starter listed as a game-time decision.
 - **Tier 3:** a starter who missed practice with no firm status — include only if it's a pattern.
 - **Skip:** backups; practice-squad; "limited" status with no follow-up.
 
-The Ravens tab ignores these tiers and includes every Ravens injury update, practice notes included.
+The Ravens tab carries no injury section at all — the practice report at the top of that tab
+is the injury coverage, and it is built from the official reports rather than written here.
 
 ## Bullet format
 
 ```
-- MM/DD: Headline-style sentence in compact, plain English. [Source](url)
+- Headline-style sentence in compact, plain English. [Source](url)
 ```
 
-- **MM/DD prefix** from the item's `published_at` (or the run date if structured data has no date).
+- **No date prefix.** Everything here is from the last day and the app stamps the brief with
+  when it was written, so a date on every line restates what the reader already knows and
+  costs the space the headline needs.
 - **Compact headline:** lead with team + role + player; include load-bearing facts (years, $$,
   term) and stop. No editorial second clauses.
 - **Linked source tag at the end:** the bracketed token IS the link — `[ESPN](url)`,
@@ -172,14 +178,15 @@ After producing all tabs, open the run log at `run_log_path` and write ONLY thes
   "digest_outputs": {
     "national": {"full_markdown": "..."},
     "ravens":   {"full_markdown": "..."},
-    "rivals":   {"PIT": {"full_markdown": "..."}}
+    "rivals":   {"full_markdown": "..."}
   },
   "prompt_version": "digest"
 }
 ```
 
-One `rivals.<code>` entry per rival in `team_coverage.rivals`. The `full_markdown` for each tab
-is exactly the content you wrote between its `=== TAB: … ===` delimiters.
+Three entries, no more: `rivals` is one combined brief, not a map keyed by team code. The
+`full_markdown` for each tab is exactly the content you wrote between its `=== TAB: … ===`
+delimiters.
 
 ## Length discipline
 
