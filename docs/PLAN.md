@@ -19,12 +19,16 @@ shots the feed is built against are in [design-reference/](design-reference/).
 
 ## Navigation
 
-Three tabs along the bottom: **Tweets** (the default — the app opens here), **Articles**,
-**Brief**.
+Four tabs along the bottom: **Tweets** (the default — the app opens here), **Articles**,
+**Brief**, **Schedule**.
 
 Scope tabs sit at the top, styled and behaving like Twitter's list tabs: **Ravens · NFL ·
-Steelers**, swipeable left/right, with the active scope's accent underlining it. Ravens is the
-default. Both choices persist.
+Rivals**, with the active scope's accent underlining it. Ravens is the default. Both choices
+persist. Swiping between scopes follows the thumb and snaps on release; it never moves between
+bottom tabs, because one gesture with two meanings is predictable in neither.
+
+A gear in the masthead opens **Usage** — spending, per-account cost, and source health. It
+answers a question asked monthly, not a place you go, which is why it is not a tab.
 
 ## Tweets
 
@@ -101,6 +105,17 @@ Tapping a row opens `#/tweet/<id>`: the tweet larger, its quoted post tappable i
 detail, the full thread below, the engagement row, and a back control that restores the exact
 scroll position. Scroll position is preserved across every navigation.
 
+## Rivals
+
+Steelers, Bengals, Browns, Chiefs and Bills share one scope. Five tabs for teams checked twice
+a week would be five near-empty rooms; the point is keeping half an eye on all of them at once.
+
+One beat writer each, plus articles where a local outlet publishes a usable feed. One good beat
+writer carries most of what matters about a team you check twice a week — who practised, what
+the building feels like — and a second voice mostly repeats the first. Kansas City and
+Cincinnati use SB Nation sites because the Star stalls automated requests and the Enquirer
+retired its feeds.
+
 ## Articles
 
 A scannable list. The row leads with the publisher's own mark, because which outlet ran a story
@@ -139,11 +154,81 @@ One card layout, one sort function, a per-scope weighting:
 
 **Day boundaries win in both.** A two-day-old piece never sits above today's news.
 
+## Schedule
+
+The league's schedule and results, from ESPN's public API at no cost. Scope-aware, so the top
+selector keeps meaning something: a team scope opens on that team's season, because week paging
+would make you hunt for the one game that matters; NFL and Rivals open on the week, where the
+week is the unit.
+
+Every game with kickoff time, network, venue, records, live score during and final after; any
+week forward and back through the playoffs; standings by division; any team's full season.
+
+**The TV distribution map is not buildable.** ESPN labels every Sunday afternoon game
+"national", which is wrong for regional CBS and FOX windows, and 506sports blocks automated
+access and publishes its maps as images. A two-thirds-right answer about which game you can
+watch is worse than none.
+
 ## Brief
 
-The daily brief, per scope: **Summary, Transactions, Injuries**. Source Health is fetch
-diagnostics and is both absent from the prompt and filtered at render, so a digest written
-before that change can't show it either.
+Three documents, not one with different inputs.
+
+**NFL** is a daily digest — Summary, Transactions, Injuries. The feed is too large to read
+closely, so this is how the league stays legible without scrolling all of it. The version that
+earns its place.
+
+**Rivals** is the same three sections shared across all five teams, ordered by importance rather
+than by team, each bullet naming its own.
+
+**Ravens** is a game-week dossier followed by a single **Key news** section. No written
+injuries: the practice report above is built from official filings and is always more current,
+so a written one would be a worse copy of something already read. A transaction that matters is
+news and belongs in Key news.
+
+Bullets carry no date prefix — everything is from the last day and the brief is stamped with
+when it was written.
+
+### The game-week dossier
+
+Not a summary of the day. It answers whether you are ready for Sunday, and fills in as the week
+goes. In order: the matchup, articles about this specific game, the practice report, the
+opponent's beat writer, the statistical comparison, the forecast.
+
+Almost none of it is written. A model summarising a table of practice participation only adds a
+way for it to be wrong.
+
+- **Injuries** are the grid the team posts as a graphic — player, position, injury, a column per
+  practice day, then the designation. NFL.com publishes only the most recent day, so each day is
+  snapshotted and the week assembled from the history. Bounded to one game week: an eight-day
+  window would put last Wednesday's column beside this one. Before the first filing it says so,
+  and names the day, read on the league's calendar rather than the phone's.
+- **Statistics** put the away team left and the home team right, offence then defence, with
+  league ranks. Ranks are computed here: ESPN fills in `rank` for what a team allows and leaves
+  it null for what a team produces, so its own numbers would give ranked defence and blank
+  offence.
+- **The opponent's beat writer** appears in a box you scroll inside, so the rest of the dossier
+  stays a thumb away. The writer for each of the 32 teams is listed in config, and only the
+  upcoming opponent's is polled — under a scope no tab filters on, so their week feeds the
+  dossier without appearing in a feed. It rotates itself from the schedule.
+- **Weather** at kickoff from Open-Meteo, against a table of the 32 stadiums. Domes say so;
+  a retractable roof still gets a forecast. A neutral site names the venue instead — no
+  coordinate table covers where the league goes next.
+- **Previews** are articles already collected that name the opponent. Selected that way rather
+  than by looking for the word "preview": a beat writer's piece on the matchup rarely calls
+  itself one.
+
+## Usage
+
+What the polling actually costs, so adding a handle or changing the cadence is decided against
+real numbers. twitterapi.io publishes no billing API and no cost header, so this is computed —
+$0.00015 per request, $0.15 per thousand tweets returned. The store keeps requests and tweets
+rather than dollars, so correcting a price re-prices the whole history.
+
+The month and its pace, then every account and what it cost, then what 1, 5, 10 and 15-minute
+polling would each cost at the volume actually seen. Source health lives here too.
+
+No spending cap: the app going quiet mid-season is a worse failure than the overspend it would
+prevent.
 
 ## Design system
 
@@ -156,16 +241,26 @@ Twitter uses one: quoted tweets and link previews.
 ## Architecture
 
 ```
-worker/          Cloudflare Worker + D1: polls twitterapi.io, resolves link cards, serves /tweets
+worker/          Cloudflare Worker + D1. Polls twitterapi.io; serves /tweets, /usage,
+                 /injuries, /health. Deployed by hand: `npx wrangler deploy`.
   migrations/    D1 schema changes, applied with `wrangler d1 execute --remote --file=`
-pipeline/        fetches articles/structured data, clusters, writes web/data/*.json
-scripts/         fetch_source_icons.py, check_allowlist.py, verify_deploy.py
+pipeline/        orchestrator.py  articles and structured data, hourly
+                 publish.py       clusters and writes web/data/*.json
+                 schedule.py      season, scores, standings
+                 injuries.py      a daily practice-report snapshot into D1
+                 gameweek.py      the dossier
+                 tweets.py        handle sync and manual backfill
+                 data/stadiums.py coordinates and roof type, for the forecast
+scripts/         verify_handles, fetch_source_icons, fetch_team_logos,
+                 check_allowlist, verify_deploy
 web/
   js/
     data.js      fetching, caching, pagination, offline fallback
     store.js     app state: scope, route, feed, pending, likes
-    router.js    hash routes: #/tweets, #/tweet/<id>, #/liked, #/articles, #/brief
-    views/       feed, tweet, detail, articles, brief, liked, lightbox, chrome
+    router.js    hash routes: #/tweets, #/tweet/<id>, #/liked, #/articles,
+                 #/schedule, #/brief, #/settings
+    views/       feed, tweet, detail, articles, schedule, brief, dossier,
+                 settings, liked, lightbox, chrome
     lib/         dom, icons, time, likes
   sw.js          data network-first; shell stale-while-revalidate
 ```
@@ -177,6 +272,11 @@ concatenates HTML, which is why text from other people can't become markup.
 The service worker serves the shell **stale-while-revalidate**. Cache-first pinned the app to
 whatever it had stored and made every deploy invisible until a version string changed by hand.
 The consequence worth knowing: a change lands on the second open, not the first.
+
+Everything on the server keeps time in **Eastern** — the poll's waking hours, the day a cost or
+a practice report belongs to, the day the first injury report is filed. Those follow the
+league's calendar and must not move when the phone does. Clock times in the app are local,
+because they answer when to be in front of a television.
 
 ### Tweet data
 
@@ -201,26 +301,39 @@ automatically — the poll watermark only reaches forward — so the store heals
 `python3 scripts/fetch_source_icons.py` for its logo. A site that blocks the icon crawl gets an
 `icon_url:` in its config entry, which is what espn.com needs.
 
-**A Twitter handle:** add it to `config/sources.yaml`, then `python3 pipeline/tweets.py --mode
-sync-handles`. The Worker builds its poll query from that table, so the YAML alone does
-nothing.
+**A Twitter handle:** add it to `config/sources.yaml`, run `python3 scripts/verify_handles.py`,
+then `python3 pipeline/tweets.py --mode sync-handles`. The Worker builds its poll query from
+that table, so the YAML alone does nothing. Verify first: a misspelled handle is accepted by
+the query, returns nothing forever, and is reported by nothing. `--only` backfills just the new
+one, for a fraction of a full sweep.
 
-Handle cost: 18–21 are free, each further block of 21 adds about $1.09/month, and each handle's
-own tweets run about $0.07/month. Roughly 60 handles lands near $4.50/month against a $5–10
-ceiling. **Money is not the constraint; attention is.** Be generous with Ravens handles and
-picky with national ones — thirty accounts echoing the same Schefter post is the noise this app
-exists to escape.
+**A rival team:** add it under `team_coverage.rivals` with a beat writer, and its team code
+reaches the schedule tab through `config.json` without a code change.
+
+Handle cost: 21 fit in one search query, each further block of 21 adds about $1.09/month, and
+each handle's own tweets run about $0.07/month. Forty-one handles is about $3.60/month against
+a $5–10 ceiling; the next threshold is 43. **Money is not the constraint; attention is.** Be
+generous with Ravens handles and picky with national ones — thirty accounts echoing the same
+Schefter post is the noise this app exists to escape.
+
+**The beat-writer table needs a human glance each preseason.** `verify_handles.py` proves an
+account exists, not that the person still works that beat.
 
 ## Not built yet
 
+- **Settings written from the app** — adding, removing and muting accounts, and changing the
+  cadence, from the phone. Wanted, but it is the first write path from the internet into
+  something that costs money, and deserves its own decision. Muting is the piece worth having
+  first, and it can be device-local like likes.
 - **Search** over stored tweets, using D1's full-text index. No API calls, no cost.
-- **More handles** — the list is Matt's to choose.
-- **Scores and schedule** — a thin band showing the next Ravens game or the live score. First
-  thing after search.
-- **Gameday mode** — pregame tunnel and warmup content, live injury updates, post-game video
-  and articles. Worth designing properly; the game itself is watched elsewhere.
-- **Rivals** — whether Steelers stays its own scope or rivals collapse into NFL with one beat
-  writer each. Decide after living with the feed.
+- **Echo suppression** — the same story from several accounts collapsing to one row. Declined
+  for now; reading it twice is easy to scroll past.
+- **Where you left off** — a mark in the feed, and the "what you missed" brief it would enable.
+- **Keyword muting** — sponsored posts and ad reads.
+- **Schedule filters** — primetime only, Sunday nights for the next month.
+- **A post-game package** — the dossier's Monday form, showing the final and the reaction.
+- **Gameday mode** — live in-game behaviour. Declined in spirit: during the game the game is
+  being watched, and Twitter-during-a-game is the habit this app exists to escape.
 - **Likes in D1** — durable and cross-device, if losing local likes ever matters.
 - **"What you missed"** — a brief generated against unseen tweets rather than a fixed 24-hour
   window. Only meaningful once unread state exists.
@@ -233,5 +346,4 @@ exists to escape.
   page, so NFL.com contributes no articles at all. Pre-existing and unfixed.
 - **`nfl_com_injuries` / `nfl_com_transactions`** warn with zero items outside the season's
   transaction traffic. Expected, and ESPN's API covers both.
-- **About 250 stored tweets predate the rich-tweet fields** and render with letter badges
-  instead of avatars. They age out within a week of 2026-09-08.
+- **The TV map** cannot be built; see Schedule.
