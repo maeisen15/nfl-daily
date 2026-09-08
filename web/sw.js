@@ -1,6 +1,12 @@
 /* NFL Daily service worker — cache shell, network-first for data. */
-const SHELL = "nfl-daily-shell-v8";
-const SHELL_FILES = ["index.html", "app.css", "app.js", "manifest.webmanifest"];
+const SHELL = "nfl-daily-shell-v9";
+const SHELL_FILES = [
+  "index.html", "app.css", "manifest.webmanifest",
+  "js/main.js", "js/data.js", "js/store.js", "js/router.js",
+  "js/lib/dom.js", "js/lib/icons.js", "js/lib/time.js", "js/lib/likes.js",
+  "js/views/chrome.js", "js/views/feed.js", "js/views/tweet.js", "js/views/detail.js",
+  "js/views/articles.js", "js/views/home.js", "js/views/liked.js", "js/views/lightbox.js",
+];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(SHELL).then(c => c.addAll(SHELL_FILES)).then(() => self.skipWaiting()));

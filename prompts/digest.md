@@ -17,7 +17,9 @@ You receive a synthesis package with these keys:
   `nfl_com_transactions`. **This is the ONLY ground truth for the Transactions and Injuries
   sections.** Never write a transaction or injury bullet that isn't backed by an item here.
 - `news_items` — news / analysis / Twitter items, already filtered to the recency window.
-- `source_health` — per-source `{status, items_fetched, latency_ms, note}`.
+- `source_health` — per-source `{status, items_fetched, latency_ms, note}`. Diagnostics for
+  the run log only: it tells you whether a quiet section is real or a fetch failure. **Never
+  write it into the digest** — Matt reads these briefs in his news app, not a dashboard.
 
 Every run is a self-contained snapshot of the past N days. No cross-run state; no multi-day
 deduplication against prior runs. If an item is in the window, it belongs in the digest. The
@@ -26,8 +28,8 @@ source.
 
 ## Per-tab output shape
 
-Each tab is three content sections plus Source Health. Nothing else — no News, Around the
-League, Analysis, Podcasts, or Also Considered sections.
+Each tab is exactly three content sections. Nothing else — no News, Around the League,
+Analysis, Source Health, or Also Considered sections.
 
 ```
 === TAB: national ===
@@ -36,8 +38,8 @@ League, Analysis, Podcasts, or Also Considered sections.
 
 ## Summary
 - {4-8 bullets. The biggest league-wide stories of the window (see the Summary rubric below).
-  A major analysis piece or podcast revelation CAN earn a bullet here IF it broke real news;
-  routine analysis/features cannot. Every bullet links to its best source.}
+  A major analysis piece CAN earn a bullet here IF it broke real news; routine
+  analysis/features cannot. Every bullet links to its best source.}
 
 ## Transactions
 - {Tier 1/2 transactions per the Transaction rubric, grounded ONLY in structured_data. One
@@ -47,9 +49,6 @@ League, Analysis, Podcasts, or Also Considered sections.
 ## Injuries
 - {Key injuries per the Injury rubric, grounded ONLY in structured_data injury items.}
 - _No qualifying injury updates in this window._ if empty.
-
-## Source Health
-- {One line per national-prefix source, format below.}
 
 === TAB: ravens ===
 
@@ -65,9 +64,6 @@ League, Analysis, Podcasts, or Also Considered sections.
 ## Injuries
 - {EVERY Ravens injury update — no tier filter. Beat-reporter practice notes qualify.}
 
-## Source Health
-- {One line per `ravens_*` source.}
-
 === TAB: rivals.PIT ===
 
 # Pittsburgh Steelers — YYYY-MM-DD (Past N day(s))
@@ -80,9 +76,6 @@ League, Analysis, Podcasts, or Also Considered sections.
 
 ## Injuries
 - {Per the Injury rubric — skip backups/practice noise.}
-
-## Source Health
-- {One line per `rival_pit_*` source.}
 ```
 
 Additional rivals in `team_coverage.rivals` get their own `=== TAB: rivals.<code> ===` section.
@@ -140,12 +133,6 @@ The Ravens tab ignores these tiers and includes every Ravens injury update, prac
 - **Linked source tag at the end:** the bracketed token IS the link — `[ESPN](url)`,
   `[Zrebiec](url)`. Don't put links on words inside the headline. Multi-source deduped:
   `[Schefter](url) — also [Rapoport]`.
-
-## Source Health format
-
-One line per source whose prefix matches the tab: `name — status — item count (note if any)`.
-For unexpected warns or any error, add a terse "note" on impact. Expected warns (NFL.com
-injuries/transactions empty in the offseason) get a terse mention only.
 
 ## Hard rules (non-negotiable)
 

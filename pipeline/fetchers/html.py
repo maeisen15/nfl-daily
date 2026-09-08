@@ -21,6 +21,17 @@ Per-source config in sources.yaml drives the extraction. Keys:
                           whose article fetch fails keep published_at=None and get dropped by
                           the orchestrator's strict recency filter.
         (omit)            No date extraction; published_at stays None.
+  - fetch_og_image (bool, default false) — opt in to fetching each article page purely to read
+        its og:image. Only needed for sources that do NOT already use date_strategy:
+        article_meta (those get the image out of the same request for free). Costs one HTTP
+        call per item that the index page didn't already yield an image for, run through the
+        same bounded thread pool. Leave it off for sources where latency matters more than
+        thumbnails.
+
+IMAGES: every item gets an `image` key (an absolute https URL, or None). The index page's own
+markup is checked first because it is free; the article page is only fetched when it is being
+fetched anyway for the date, or when fetch_og_image is set. Extraction never raises — an
+article with no image publishes normally.
 
 HARVEST MODES (driven by which selector key is set):
 
@@ -49,6 +60,8 @@ from urllib.parse import urljoin
 import requests
 from bs4 import BeautifulSoup
 
+from . import images
+
 DEFAULT_TIMEOUT = 15
 DEFAULT_UA = "Mozilla/5.0"
 # Article-meta enrichment uses a fuller browser-like UA since some publishers reject bare UAs
@@ -58,7 +71,9 @@ ARTICLE_META_UA = (
     "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 )
 ARTICLE_META_WORKERS = 5
-ARTICLE_META_TIMEOUT = 12
+# (connect, read). A publisher that never completes the handshake fails in 5s instead of
+# holding a worker for the full read budget and stretching the hourly run.
+ARTICLE_META_TIMEOUT = (5, 10)
 
 
 def fetch(source: dict[str, Any]) -> dict[str, Any]:
@@ -89,8 +104,10 @@ def fetch(source: dict[str, Any]) -> dict[str, Any]:
         for it in items:
             it["source_id"] = source_id
 
-        if source.get("date_strategy") == "article_meta" and items:
-            _enrich_dates_from_article_meta(items)
+        want_date = source.get("date_strategy") == "article_meta"
+        want_image = bool(source.get("fetch_og_image"))
+        if items and (want_date or want_image):
+            _enrich_from_article_page(items, want_date=want_date, want_image=want_image)
 
         # `assume_current`: for status pages that carry no per-item date (NFL.com
         # injuries/transactions), treat undated items as current so the strict recency filter
@@ -157,6 +174,7 @@ def _harvest_href_regex(soup: BeautifulSoup, source: dict[str, Any], max_items: 
                 "published_at": pub_iso,
                 "snippet": None,
                 "author": None,
+                "image": _image_near_anchor(a, source.get("url", "")),
             }
         )
         if len(items) >= max_items:
@@ -191,11 +209,39 @@ def _harvest_css(soup: BeautifulSoup, source: dict[str, Any], max_items: int) ->
                 "published_at": None,
                 "snippet": None,
                 "author": None,
+                "image": _image_near_anchor(node, source.get("url", "")),
             }
         )
         if len(items) >= max_items:
             break
     return items
+
+
+# How far up the DOM to look for an article thumbnail. An index page's card is usually the
+# anchor's parent or grandparent; going further reaches the list container and starts picking
+# up other articles' images.
+_IMAGE_ANCESTOR_LEVELS = 2
+# An ancestor holding more than this many links isn't a single article card any more.
+_IMAGE_ANCESTOR_MAX_LINKS = 4
+
+
+def _image_near_anchor(a, base: str) -> str | None:
+    """Best-effort thumbnail from the index page's own markup. Free — no extra request."""
+    try:
+        node = a
+        for level in range(_IMAGE_ANCESTOR_LEVELS + 1):
+            if node is None:
+                break
+            if level > 0 and len(node.find_all("a", href=True)) > _IMAGE_ANCESTOR_MAX_LINKS:
+                break
+            for img in node.find_all("img"):
+                url = images.image_from_img_tag(img, base)
+                if url and not images.looks_decorative(url):
+                    return url
+            node = node.parent
+    except Exception:  # noqa: BLE001 — never let image extraction break a source
+        return None
+    return None
 
 
 def _extract_title(a, strategy: str) -> str:
@@ -318,13 +364,29 @@ _ARTICLE_DATE_PATTERNS = [
 ]
 
 
-def _enrich_dates_from_article_meta(items: list[dict[str, Any]]) -> None:
-    """For each item, GET the article URL and parse a publication date from common meta tags.
+def _enrich_from_article_page(
+    items: list[dict[str, Any]], want_date: bool, want_image: bool
+) -> None:
+    """GET each article URL once and pull the publication date and/or og:image out of it.
 
-    Mutates items in place — sets `published_at` to an ISO 8601 string if extraction succeeds.
-    Failures are silent (leave published_at=None); strict recency filter drops them downstream.
-    Runs in parallel with a small thread pool.
+    One request per item, at most — date and image come from the same response. Items that
+    already have everything the caller wants are skipped, so `fetch_og_image` on a source
+    whose index page already carries thumbnails costs nothing.
+
+    Mutates items in place. Failures are silent: `published_at` stays None (the strict recency
+    filter drops the item downstream) and `image` stays None (the article still publishes).
+    Runs in parallel with a small bounded thread pool and a short timeout so a hanging
+    publisher can't stall the hourly run.
     """
+    def needs_fetch(item: dict[str, Any]) -> bool:
+        if want_date and not item.get("published_at"):
+            return True
+        return bool(want_image and not item.get("image"))
+
+    targets = [it for it in items if needs_fetch(it)]
+    if not targets:
+        return
+
     def fetch_one(item: dict[str, Any]) -> None:
         try:
             resp = requests.get(
@@ -338,20 +400,25 @@ def _enrich_dates_from_article_meta(items: list[dict[str, Any]]) -> None:
             )
             if resp.status_code != 200:
                 return
-            iso = _parse_article_date(resp.text)
-            if iso:
-                item["published_at"] = iso
+            body = resp.text
+            if want_date and not item.get("published_at"):
+                iso = _parse_article_date(body)
+                if iso:
+                    item["published_at"] = iso
+            if not item.get("image"):
+                item["image"] = images.image_from_meta(body, item["url"])
         except Exception:  # noqa: BLE001
             return
 
     with ThreadPoolExecutor(max_workers=ARTICLE_META_WORKERS) as pool:
-        list(pool.map(fetch_one, items))
+        list(pool.map(fetch_one, targets))
 
 
 def _parse_article_date(html_text: str) -> str | None:
-    # Cap the search to the document head + early body; meta tags live there and parsing
-    # 500KB of article body is wasted work.
-    haystack = html_text[:80_000]
+    # Cap the search rather than scanning a whole article. <meta> tags sit in the head, but
+    # JSON-LD is often emitted deep in the body — baltimoreravens.com puts datePublished at
+    # ~95KB — so the cap has to clear that or those sources silently lose every date.
+    haystack = html_text[:200_000]
     for pattern in _ARTICLE_DATE_PATTERNS:
         m = pattern.search(haystack)
         if not m:

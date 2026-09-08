@@ -1,0 +1,101 @@
+/* Everything that talks to the network.
+ *
+ * Two sources, deliberately separate. `web/data/*.json` is rebuilt hourly by the pipeline and
+ * carries articles and the digest. Tweets come live from the Cloudflare Worker, which polls
+ * twitterapi.io every five minutes — so the first paint never waits on them.
+ */
+
+const OFFLINE_KEY = "nfl-daily.offline.v1";
+const OFFLINE_TWEETS = 120;   // enough to fill a few screens without crowding the quota
+const PAGE = 200;
+
+export const state = {
+  config: null,
+  feed: null,
+  digest: null,
+  offline: false,
+};
+
+export async function loadStatic() {
+  const bust = `?v=${Date.now()}`;
+  const [config, feed, digest] = await Promise.all([
+    fetchJson(`data/config.json${bust}`),
+    fetchJson(`data/feed.json${bust}`),
+    fetchJson(`data/digest.json${bust}`),
+  ]);
+  state.config = config;
+  state.feed = feed;
+  state.digest = digest;
+  return state;
+}
+
+async function fetchJson(url, opts) {
+  const res = await fetch(url, opts);
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+  return res.json();
+}
+
+function workerBase() {
+  return (state.config && state.config.tweets_url) || "";
+}
+
+/* One page of tweets. `cursor` continues where the last page stopped; the Worker's cursor is
+ * a sort key, so paging stays correct even as new tweets arrive at the top. */
+export async function fetchTweets({ cursor = null, limit = PAGE, since = null } = {}) {
+  const base = workerBase();
+  if (!base) throw new Error("no tweets_url in config");
+  const url = new URL(`${base}/tweets`);
+  url.searchParams.set("hours", "168");
+  url.searchParams.set("limit", String(limit));
+  if (cursor) url.searchParams.set("cursor", cursor);
+  const body = await fetchJson(url.toString(), { cache: since ? "no-store" : "default" });
+  return {
+    items: Array.isArray(body.items) ? body.items : [],
+    cursor: body.next_cursor || null,
+    newest: body.newest_tweet_at || null,
+  };
+}
+
+/* The first page, with a fallback chain: the Worker, then whatever was cached from the last
+ * successful load, then the tweets baked into feed.json by the hourly run. The tab should
+ * never be blank just because the phone lost signal. */
+export async function loadFirstTweets() {
+  try {
+    const page = await fetchTweets({});
+    state.offline = false;
+    cacheOffline(page.items);
+    return page;
+  } catch {
+    state.offline = true;
+    const cached = readOffline();
+    if (cached.length) return { items: cached, cursor: null, newest: cached[0].published_at };
+    const baked = (state.feed?.items || []).filter(i => i.type === "tweet");
+    return { items: baked, cursor: null, newest: baked.length ? baked[0].published_at : null };
+  }
+}
+
+function cacheOffline(items) {
+  try {
+    localStorage.setItem(OFFLINE_KEY, JSON.stringify(items.slice(0, OFFLINE_TWEETS)));
+  } catch {
+    // Quota, or storage disabled. Offline reading is a nicety; losing it changes nothing else.
+  }
+}
+
+function readOffline() {
+  try {
+    const raw = localStorage.getItem(OFFLINE_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+}
+
+export function articles(scope) {
+  return (state.feed?.items || []).filter(i => i.type === "article" && (i.scopes || []).includes(scope));
+}
+
+export function digestFor(scope) {
+  const tabs = state.digest?.tabs || [];
+  const tab = tabs.find(t => t.scope === scope);
+  return tab ? tab.markdown : null;
+}

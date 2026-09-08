@@ -5,57 +5,56 @@
 <!-- video.twimg.com hotlink-protects: it 403s any request carrying a non-Twitter Referer, which
      renders inline tweet video as a black box with a disabled play button. Suppressing the
      referrer entirely gets a normal 206. This has to be a document-level policy — <video> has no
-     referrerpolicy attribute. Images (pbs.twimg.com) are unaffected either way. -->
+     referrerpolicy attribute. Images (pbs.twimg.com and publisher og:image hosts) are unaffected
+     either way, and several publishers also serve images only without a Referer. -->
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' https: data:; media-src 'self' https:; connect-src 'self' https://*.workers.dev; manifest-src 'self'; worker-src 'self'; base-uri 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' https: data:; media-src 'self' https:; connect-src 'self' https://*.workers.dev; manifest-src 'self'; worker-src 'self'; base-uri 'none'">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>NFL Daily</title>
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="NFL Daily">
-<meta name="theme-color" content="#0E0D13">
+<meta name="theme-color" content="#FFFFFF">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="app.css">
 </head>
 <body>
-<header class="masthead">
+
+<header class="masthead" id="masthead">
   <div class="masthead-row">
     <h1 class="wordmark">NFL <span>Daily</span></h1>
     <div class="masthead-side">
-      <span class="updated" id="updated">—</span>
-      <button class="theme-btn" id="themeBtn" aria-label="Switch light or dark mode">
-        <svg viewBox="0 0 24 24"><path id="themeIcon" d=""/></svg>
+      <span class="status" id="status"></span>
+      <a class="icon-btn" id="likedBtn" href="#/liked" aria-label="Liked posts">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20.7 4.6 13.6a4.9 4.9 0 0 1 0-7 4.6 4.6 0 0 1 6.6 0l.8.8.8-.8a4.6 4.6 0 0 1 6.6 0 4.9 4.9 0 0 1 0 7L12 20.7z"/></svg>
+      </a>
+      <button class="icon-btn" id="themeBtn" aria-label="Change theme">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path id="themeIcon" d=""/></svg>
       </button>
     </div>
   </div>
-  <nav class="scopes" id="scopes" aria-label="Team scope"></nav>
+  <nav class="scopes" id="scopes" aria-label="Team"></nav>
 </header>
 
-<main id="main">
-  <section id="view-home" class="view" aria-label="Digest"></section>
-  <section id="view-tweets" class="view" hidden aria-label="Tweets"></section>
-  <section id="view-articles" class="view" hidden aria-label="Articles"></section>
-</main>
+<main id="main" tabindex="-1"></main>
 
-<nav class="tabbar" aria-label="Sections">
-  <button class="tab is-active" data-tab="home">
-    <svg viewBox="0 0 24 24"><path d="M4 5h16v3H4zM4 10.5h16v2H4zM4 14.5h10v2H4zM4 18.5h13v2H4z"/></svg>
-    <span>Home</span>
-  </button>
-  <button class="tab" data-tab="tweets">
-    <svg viewBox="0 0 24 24"><path d="M4 4h16v12H9l-5 4V4z"/></svg>
+<nav class="tabbar" id="tabbar" aria-label="Sections">
+  <a class="tab" data-tab="tweets" href="#/tweets">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 4H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3v3.2L11.5 18H20a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"/></svg>
     <span>Tweets</span>
-  </button>
-  <button class="tab" data-tab="articles">
-    <svg viewBox="0 0 24 24"><path d="M5 3h11l3 3v15H5V3zm3 5h8v1.5H8V8zm0 3.5h8V13H8v-1.5zm0 3.5h5v1.5H8V15z"/></svg>
+  </a>
+  <a class="tab" data-tab="articles" href="#/articles">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h9l5 5v13H5V3zm8 1.5V9h4.5L13 4.5zM7.5 12h9v1.6h-9V12zm0 3.4h9V17h-9v-1.6zm0-6.8h3.5v1.6H7.5V8.6z"/></svg>
     <span>Articles</span>
-  </button>
+  </a>
+  <a class="tab" data-tab="home" href="#/home">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4.5h16v2.2H4V4.5zm0 4.6h16v2.2H4V9.1zm0 4.6h11v2.2H4v-2.2zm0 4.6h13v2.2H4v-2.2z"/></svg>
+    <span>Home</span>
+  </a>
 </nav>
 
-<script src="app.js"></script>
+<script type="module" src="js/main.js"></script>
 </body>
 </html>

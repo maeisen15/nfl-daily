@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """NFL Daily Digest orchestrator.
 
-Fetches the *free* sources: articles, structured data, podcasts. Tweets are NOT fetched here —
+Fetches the *free* sources: articles and structured data. Tweets are NOT fetched here —
 they arrive continuously via the twitterapi.io webhook into the Cloudflare Worker (see
 pipeline/tweets.py and worker/). This orchestrator reads them back out of the Worker, which
 costs nothing and returns the already-deduplicated, retention-pruned set.
@@ -53,9 +53,6 @@ PROMPTS_DIR = Path(os.environ.get("NFL_DAILY_PROMPTS", REPO_ROOT / "prompts")).e
 # Snippet pre-truncation when emitting the synthesis package (full snippet stays in run log).
 SNIPPET_MAX_CHARS = 220
 TITLE_MAX_CHARS = 240
-# Podcasts publish weekly (not daily), so they get a separate, fixed 7-day window regardless
-# of the --days N flag. Without this, a 1-day window would virtually always have 0 podcasts.
-PODCAST_RECENCY_HOURS = 24 * 7
 
 FETCHERS = {
     "rss": rss_fetcher.fetch,
@@ -152,13 +149,8 @@ def main() -> int:
     }
     raw_items = [item for r in fetch_results for item in r["items"]]
 
-    podcast_raw = [it for it in raw_items if it["source_id"].startswith("podcast_")]
-    non_podcast_raw = [it for it in raw_items if not it["source_id"].startswith("podcast_")]
     news_filtered = _apply_recency_filter(
-        non_podcast_raw, completed_at, recency_cap_hours, strict=not args.include_undated
-    )
-    podcast_filtered = _apply_recency_filter(
-        podcast_raw, completed_at, PODCAST_RECENCY_HOURS, strict=not args.include_undated
+        raw_items, completed_at, recency_cap_hours, strict=not args.include_undated
     )
     # Tweets live in the Worker, fed continuously by the twitterapi.io webhook. Reading them
     # back costs nothing and yields the deduplicated, retention-pruned set.
@@ -193,20 +185,13 @@ def main() -> int:
             json.dump(run_log, f, indent=2, default=str)
 
     # Build the synthesis package (slim view for the in-session Claude).
-    # Podcasts use a fixed 7-day window (their natural cadence); everything else uses
-    # the user's chosen --days window. news_filtered + podcast_filtered were already produced
-    # above (used to build tweet_feeds before the run log was written).
-    recency_filtered = news_filtered + podcast_filtered  # for totals/reporting only
-
     truncated_news = [_truncate_item(it) for it in news_filtered]
-    truncated_podcasts = [_truncate_item(it) for it in podcast_filtered]
     structured_items = [it for it in truncated_news if it["source_id"] in STRUCTURED_SOURCE_IDS]
     # Articles + the quotable subset of tweets. feed_only handles and pure retweets are
     # already excluded by _load_tweets_from_worker.
     news_items = [
         it for it in truncated_news if it["source_id"] not in STRUCTURED_SOURCE_IDS
     ] + tweet_synthesis_items
-    podcast_items = truncated_podcasts
 
     # Pointer for reference only — the synthesizing agent reads the prompt per RUNBOOK.md.
     prompt_path = PROMPTS_DIR / "digest.md"
@@ -218,19 +203,17 @@ def main() -> int:
         "days_back": args.days,
         "recency_hours_cap": recency_cap_hours,
         "strict_recency": not args.include_undated,
-        "recency_kept": len(recency_filtered),
-        "recency_dropped": len(raw_items) - len(recency_filtered),
+        "recency_kept": len(news_filtered),
+        "recency_dropped": len(raw_items) - len(news_filtered),
         "source_health": source_health,
         "team_coverage": _team_coverage_meta(config),
         "structured_data": structured_items,
-        "podcast_items": podcast_items,
-        "news_items": news_items,  # articles + quotable tweets; minus structured, podcasts, feed_only
+        "news_items": news_items,  # articles + quotable tweets; minus structured data and feed_only handles
         "tweet_feeds": tweet_feeds,  # per-tab raw tweet pool for the Tweet Feed UI (verbatim, not synthesized)
         "totals": {
             "raw_in": len(raw_items),
-            "after_recency": len(recency_filtered),
+            "after_recency": len(news_filtered),
             "structured_count": len(structured_items),
-            "podcast_count": len(podcast_items),
             "news_count": len(news_items),
         },
         "sources_summary": {
@@ -261,7 +244,7 @@ def main() -> int:
 def _collect_sources(config: dict[str, Any], restrict: list[str] | None = None) -> list[dict[str, Any]]:
     """Flatten sources.yaml into a single list of enabled source dicts."""
     out: list[dict[str, Any]] = []
-    for tier in ("news_sources", "analysis_sources", "structured_data", "podcasts"):
+    for tier in ("news_sources", "analysis_sources", "structured_data"):
         for src in config.get(tier) or []:
             if not src.get("enabled", True):
                 continue
@@ -449,6 +432,9 @@ def _truncate_item(item: dict[str, Any]) -> dict[str, Any]:
     out = dict(item)
     out["title"] = _clean_trim(out.get("title") or "", TITLE_MAX_CHARS)
     out["snippet"] = _clean_trim(out.get("snippet") or "", SNIPPET_MAX_CHARS) or None
+    # The article image is for the app's Articles tab; the synthesizing model has no use for
+    # it and CDN URLs are long. It stays in the run log, which is what publish.py reads.
+    out.pop("image", None)
     return out
 
 

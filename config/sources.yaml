@@ -4,6 +4,16 @@
 # Edit freely: add, remove, swap, toggle `enabled`. When you add a source on a NEW domain,
 # also add that domain (apex + wildcard) to docs/network-allowlist.txt and to the cloud
 # routine's network allowlist, or the scheduled run will get a 403 fetching it.
+#
+# Per-news-source keys beyond the fetcher's own:
+#   rank:            integer, lower = higher priority. Published on every article as
+#                    `source_rank` (default 99 when unset); the app sorts the Ravens tab by it,
+#                    and it decides which article survives when duplicates of the same story
+#                    are clustered together. Ranks are spaced by 10 so a new source can slot
+#                    between two existing ones without renumbering.
+#   fetch_og_image:  opt in to fetching each article page for its og:image. Only set it on
+#                    sources whose feed/index page carries no thumbnail of its own — it costs
+#                    one extra HTTP request per imageless item on every run.
 
 # ---- News pages ----------------------------------------------------------------------------
 news_sources:
@@ -12,6 +22,8 @@ news_sources:
     url: "https://www.espn.com/nfl/"
     rss_url: "https://www.espn.com/espn/rss/nfl/news"
     fetch: "rss"
+    rank: 20
+    fetch_og_image: true
     enabled: true
 
   - id: cbs_nfl
@@ -19,6 +31,7 @@ news_sources:
     url: "https://www.cbssports.com/nfl/"
     rss_url: "https://www.cbssports.com/rss/headlines/nfl/"
     fetch: "rss"
+    rank: 30
     enabled: true
 
   - id: nyt_athletic_nfl
@@ -26,6 +39,7 @@ news_sources:
     url: "https://www.nytimes.com/athletic/nfl/"
     rss_url: "https://www.nytimes.com/athletic/rss/nfl"
     fetch: "rss"
+    rank: 10
     enabled: true
 
   - id: fox_nfl
@@ -33,6 +47,7 @@ news_sources:
     url: "https://www.foxsports.com/nfl"
     rss_url: "https://api.foxsports.com/v2/content/optimized-rss?partnerKey=MB0Wehpmuj2lUhuRhQaafhBjAJqaPU244mlTDK1i&size=30&tags=fs/nfl"
     fetch: "rss"
+    rank: 40
     enabled: true
 
   - id: nfl_com_news
@@ -47,6 +62,8 @@ news_sources:
     title_strategy: "anchor_text"
     date_strategy: "title_suffix_month_day"
     max_items: 40
+    rank: 50
+    fetch_og_image: true
     enabled: true
 
 # ---- Analysis-only sources ----------------------------------------------------------------
@@ -62,6 +79,8 @@ analysis_sources:
     title_strategy: "anchor_text"
     date_strategy: "url_yyyy_mm_dd"
     max_items: 30
+    rank: 45
+    fetch_og_image: true
     enabled: true
 
 # ---- Structured data ----------------------------------------------------------------------
@@ -116,46 +135,6 @@ structured_data:
     title_strategy: "anchor_text"
     assume_current: true   # status page has no per-item dates; treat items as current (see html.py)
     max_items: 80
-    enabled: true
-
-# ---- Podcasts -----------------------------------------------------------------------------
-# Surfaced in the digest's "F. Podcasts" section as: podcast name + episode title + date +
-# listen link. We pull podcast RSS feeds directly (most podcasts are just RSS under the hood)
-# and use the existing rss fetcher.
-podcasts:
-  - id: podcast_mina_kimes
-    name: "The Mina Kimes Show featuring Lenny"
-    rss_url: "https://feeds.megaphone.fm/ESP8957020927"
-    fetch: "rss"
-    max_items: 8
-    enabled: true
-
-  - id: podcast_football_301
-    name: "Football 301 with Nate Tice"
-    rss_url: "https://feeds.simplecast.com/Nvy5cWFT"
-    fetch: "rss"
-    max_items: 8
-    enabled: true
-
-  - id: podcast_ringer_nfl
-    name: "The Ringer NFL Show"
-    rss_url: "https://feeds.megaphone.fm/the-ringer-nfl-show"
-    fetch: "rss"
-    max_items: 8
-    enabled: true
-
-  - id: podcast_schatz_tanier
-    name: "The Schatz & Tanier NFL Podcast"
-    rss_url: "https://feeds.simplecast.com/S_L_BPM1"
-    fetch: "rss"
-    max_items: 8
-    enabled: true
-
-  - id: podcast_athletic_football
-    name: "The Athletic Football Show"
-    rss_url: "https://feeds.acast.com/public/shows/681cc905bdc60241406b737f"
-    fetch: "rss"
-    max_items: 8
     enabled: true
 
 # ---- Twitter ------------------------------------------------------------------------------
@@ -242,6 +221,7 @@ team_coverage:
         url: "https://www.nytimes.com/athletic/nfl/team/ravens/"
         rss_url: "https://www.nytimes.com/athletic/rss/nfl/ravens/"
         fetch: "rss"
+        rank: 10
         enabled: true
 
       - id: ravens_news_russell_street
@@ -249,6 +229,8 @@ team_coverage:
         url: "https://russellstreetreport.com/"
         rss_url: "https://russellstreetreport.com/feed/"
         fetch: "rss"
+        rank: 40
+        fetch_og_image: true
         enabled: true
 
       - id: ravens_news_banner
@@ -263,6 +245,7 @@ team_coverage:
         title_strategy: "anchor_text"
         date_strategy: "article_meta"
         max_items: 25
+        rank: 20
         enabled: true
 
       - id: ravens_news_official
@@ -273,9 +256,12 @@ team_coverage:
         # JSON-LD datePublished — article_meta picks it up.
         link_pattern: "^/news/[a-z0-9-]{10,}/?$"
         link_base: "https://www.baltimoreravens.com"
-        title_strategy: "anchor_text"
+        # The anchor wraps the card image and a category label, so its text reads
+        # "news News & Notes: … Sep 07, 2026". aria-label carries the clean headline.
+        title_strategy: "attribute:aria-label"
         date_strategy: "article_meta"
         max_items: 25
+        rank: 50
         enabled: true
 
       - id: ravens_news_sun
@@ -290,6 +276,7 @@ team_coverage:
         title_strategy: "anchor_text"
         date_strategy: "url_yyyy_mm_dd"
         max_items: 25
+        rank: 30
         enabled: true
 
     twitter_handles:
@@ -332,6 +319,7 @@ team_coverage:
           url: "https://www.nytimes.com/athletic/nfl/team/steelers/"
           rss_url: "https://www.nytimes.com/athletic/rss/nfl/steelers/"
           fetch: "rss"
+          rank: 10
           enabled: true
 
         - id: rival_pit_news_pennlive
@@ -339,6 +327,7 @@ team_coverage:
           url: "https://www.pennlive.com/steelers/"
           rss_url: "https://www.pennlive.com/arc/outboundfeeds/rss/category/steelers/?outputType=xml"
           fetch: "rss"
+          rank: 30
           enabled: true
 
         - id: rival_pit_news_post_gazette
@@ -346,6 +335,7 @@ team_coverage:
           url: "https://www.post-gazette.com/sports/steelers"
           rss_url: "https://www.post-gazette.com/rss/sports/steelers"
           fetch: "rss"
+          rank: 20
           enabled: true
 
       twitter_handles:

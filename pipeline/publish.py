@@ -15,10 +15,12 @@ import glob
 import hashlib
 import html
 import json
+import math
 import os
 import re
 import sys
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 try:
     import yaml
@@ -37,6 +39,10 @@ SCHEMA_VERSION = 1
 # so Matt can catch up on articles he didn't read the day they dropped). Override with
 # NFL_DAILY_ARTICLE_WINDOW_HOURS.
 ARTICLE_WINDOW_HOURS = 48
+
+# Source rank published on every article as `source_rank` when sources.yaml doesn't set one.
+# High enough that an unranked source always sorts below a ranked one and loses every cluster.
+DEFAULT_SOURCE_RANK = 99
 
 TEAM_CODES = {
     "Arizona Cardinals": "ARI", "Atlanta Falcons": "ATL", "Baltimore Ravens": "BAL",
@@ -146,11 +152,16 @@ def load_sources_config(path):
     rivals = tc.get("rivals", []) or []
     # source_id -> display name, for attribution on cards
     names = {}
+    # source_id -> rank (lower = higher priority). Drives the app's Ravens-tab sort and
+    # decides which article survives when duplicates are clustered.
+    ranks = {}
 
     def walk(node):
         if isinstance(node, dict):
             if "id" in node and "name" in node:
                 names[node["id"]] = node["name"]
+            if "id" in node and isinstance(node.get("rank"), int):
+                ranks[node["id"]] = node["rank"]
             for v in node.values():
                 walk(v)
         elif isinstance(node, list):
@@ -158,7 +169,7 @@ def load_sources_config(path):
                 walk(v)
 
     walk(cfg)
-    return primary, rivals, names
+    return primary, rivals, names, ranks
 
 
 def article_scopes(source_id, tracked_rival_codes):
@@ -171,7 +182,182 @@ def article_scopes(source_id, tracked_rival_codes):
     return ["national"]
 
 
-def build_items(run, primary_code, rival_codes):
+# ---- article clustering -------------------------------------------------------------------
+#
+# The same story runs at ESPN, CBS and FOX; the app should show it once. Titles are the only
+# signal available — there is no LLM and no API call here, because this runs in the hourly
+# GitHub Actions job with no credentials and no budget.
+#
+# Every threshold below is tuned to UNDER-merge. A missed merge shows Matt a story twice, which
+# he barely notices; a wrong merge hides an article from him entirely, which he can never
+# discover. When in doubt, keep both.
+
+# Two articles more than this far apart are different stories even with near-identical titles
+# (a Thursday injury report and the Sunday follow-up).
+CLUSTER_WINDOW_HOURS = 36
+# Weighted-Jaccard floor: the shared share of both titles' total weight.
+CLUSTER_MIN_JACCARD = 0.50
+# Escape hatch for a long headline and a short one about the same story, where Jaccard is
+# unfairly punished by the length gap. Deliberately strict.
+CLUSTER_MIN_OVERLAP = 0.72
+CLUSTER_OVERLAP_MIN_SHARED = 4
+# Floor on raw shared tokens — two words in common is a coincidence, not a story match.
+CLUSTER_MIN_SHARED = 3
+# ...at least this many of which must be distinctive (rare across the scope's articles), so a
+# match can't be carried by "ravens", "nfl", "week".
+CLUSTER_MIN_DISTINCTIVE = 2
+
+# Dropped before comparison: function words plus the sports-page filler that appears in a large
+# share of headlines and carries no story identity.
+_CLUSTER_STOPWORDS = {
+    "a", "about", "after", "against", "all", "amid", "an", "and", "any", "are", "as", "at",
+    "be", "been", "before", "being", "but", "by", "can", "could", "did", "do", "does", "down",
+    "during", "each", "for", "from", "get", "gets", "had", "has", "have", "he", "her", "here",
+    "him", "his", "how", "if", "in", "into", "is", "it", "its", "just", "may", "might", "more",
+    "most", "much", "must", "my", "new", "no", "not", "now", "of", "off", "on", "one", "only",
+    "or", "other", "our", "out", "over", "own", "per", "said", "says", "she", "should", "so",
+    "some", "still", "such", "than", "that", "the", "their", "them", "then", "there", "these",
+    "they", "this", "those", "to", "too", "two", "under", "up", "upon", "us", "very", "via",
+    "was", "we", "were", "what", "when", "where", "which", "while", "who", "why", "will",
+    "with", "would", "you", "your",
+    # sports-page filler
+    "nfl", "football", "news", "report", "reports", "update", "updates", "season", "game",
+    "games", "week", "team", "teams", "player", "players", "day", "says",
+}
+
+
+def normalize_title_tokens(title):
+    """Title → set of significant tokens. Lowercased, depunctuated, stopwords removed."""
+    if not title:
+        return set()
+    text = title.lower().replace("’", "'")
+    text = re.sub(r"'s\b", "", text)          # possessives: "ravens' " / "ravens's" → "ravens"
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return {w for w in text.split() if len(w) > 1 and w not in _CLUSTER_STOPWORDS}
+
+
+def canonical_url(url):
+    """URL stripped to the part that identifies the story: no scheme, query, fragment or
+    trailing slash. Two articles at the same canonical URL are the same story, always."""
+    if not url:
+        return None
+    try:
+        parts = urlsplit(url.strip())
+        host = (parts.netloc or "").lower().removeprefix("www.")
+        path = (parts.path or "").rstrip("/").lower()
+        return f"{host}{path}" or None
+    except ValueError:
+        return None
+
+
+def _weighted_overlap(a_tokens, b_tokens, weights):
+    """(weighted_jaccard, weighted_overlap_coefficient, shared_tokens)."""
+    shared = a_tokens & b_tokens
+    if not shared:
+        return 0.0, 0.0, shared
+    w_shared = sum(weights[t] for t in shared)
+    w_a = sum(weights[t] for t in a_tokens)
+    w_b = sum(weights[t] for t in b_tokens)
+    w_union = w_a + w_b - w_shared
+    jaccard = w_shared / w_union if w_union else 0.0
+    smaller = min(w_a, w_b)
+    overlap = w_shared / smaller if smaller else 0.0
+    return jaccard, overlap, shared
+
+
+def cluster_articles(items):
+    """Collapse articles covering the same story. Returns (items, merged_count).
+
+    Survivors keep every field they had plus `cluster_size`; the articles they absorbed are
+    dropped from the feed with no trace, per the product spec (no "also covered by" line).
+    Non-article items pass through untouched, always with cluster_size 1.
+
+    Clustering is leader-based rather than single-linkage: candidates are visited best-source
+    first, and each either starts a cluster or joins the single best existing one. That makes
+    the highest-ranked source the survivor by construction, and stops A~B~C chaining A and C
+    together when they aren't alike at all.
+    """
+    articles = [i for i in items if i["type"] == "article"]
+    others = [i for i in items if i["type"] != "article"]
+    for it in others:
+        it["cluster_size"] = 1
+    if len(articles) < 2:
+        for it in articles:
+            it["cluster_size"] = 1
+        return items, 0
+
+    tokens = {id(a): normalize_title_tokens(a.get("title")) for a in articles}
+    published = {id(a): parse_dt(a.get("published_at")) for a in articles}
+
+    # Inverse document frequency over this run's articles: a token in many headlines
+    # ("ravens" in the Ravens scope) proves much less than a surname does.
+    doc_freq = {}
+    for a in articles:
+        for tok in tokens[id(a)]:
+            doc_freq[tok] = doc_freq.get(tok, 0) + 1
+    total = len(articles)
+    weights = {tok: math.log(1 + total / df) for tok, df in doc_freq.items()}
+    # "Distinctive" = rare in this run. The absolute floor of 3 matters on small runs: a story
+    # three outlets all covered gives its key tokens df=3, and a stricter floor would refuse to
+    # merge the third copy purely because the run was quiet.
+    distinctive_max_df = max(3, int(total * 0.12))
+    distinctive = {tok for tok, df in doc_freq.items() if df <= distinctive_max_df}
+
+    # Best source first, then newest — the leader of each cluster is the article that survives.
+    order = sorted(
+        articles,
+        key=lambda a: (a.get("source_rank", DEFAULT_SOURCE_RANK), a.get("published_at") or ""),
+    )
+
+    leaders_by_scope = {}   # scope key -> list of leader articles
+    members = {}            # id(leader) -> count
+    absorbed = set()        # id() of articles dropped from the feed
+
+    for cand in order:
+        scope_key = tuple(sorted(cand.get("scopes") or []))
+        cand_tokens = tokens[id(cand)]
+        cand_url = canonical_url(cand.get("url"))
+        cand_dt = published[id(cand)]
+
+        best_leader, best_score = None, 0.0
+        for leader in leaders_by_scope.get(scope_key, []):
+            # Identical URL is the same story no matter what the titles say.
+            if cand_url and cand_url == canonical_url(leader.get("url")):
+                best_leader, best_score = leader, 1.0
+                break
+            leader_dt = published[id(leader)]
+            if cand_dt and leader_dt:
+                if abs((cand_dt - leader_dt).total_seconds()) > CLUSTER_WINDOW_HOURS * 3600:
+                    continue
+            if not cand_tokens:
+                continue
+            jaccard, overlap, shared = _weighted_overlap(
+                cand_tokens, tokens[id(leader)], weights)
+            if len(shared) < CLUSTER_MIN_SHARED:
+                continue
+            if len(shared & distinctive) < CLUSTER_MIN_DISTINCTIVE:
+                continue
+            matched = jaccard >= CLUSTER_MIN_JACCARD or (
+                overlap >= CLUSTER_MIN_OVERLAP and len(shared) >= CLUSTER_OVERLAP_MIN_SHARED
+            )
+            if matched and jaccard > best_score:
+                best_leader, best_score = leader, jaccard
+
+        if best_leader is None:
+            leaders_by_scope.setdefault(scope_key, []).append(cand)
+            members[id(cand)] = 1
+        else:
+            members[id(best_leader)] += 1
+            absorbed.add(id(cand))
+
+    for a in articles:
+        a["cluster_size"] = members.get(id(a), 1)
+
+    kept = [i for i in items if id(i) not in absorbed]
+    return kept, len(absorbed)
+
+
+def build_items(run, primary_code, rival_codes, source_ranks=None):
     completed = parse_dt(run.get("completed_at")) or datetime.now(timezone.utc)
     window_hours = run.get("recency_hours_cap") or 24
     cutoff = completed - timedelta(hours=window_hours)
@@ -180,6 +366,7 @@ def build_items(run, primary_code, rival_codes):
     article_window_hours = int(os.environ.get("NFL_DAILY_ARTICLE_WINDOW_HOURS", ARTICLE_WINDOW_HOURS))
     article_cutoff = completed - timedelta(hours=article_window_hours)
     tracked = {primary_code} | set(rival_codes)
+    ranks = source_ranks or {}
 
     items, seen = [], set()
 
@@ -255,6 +442,7 @@ def build_items(run, primary_code, rival_codes):
                 "media": [],
             }, (rtype, sid, r.get("title")))
         else:  # article
+            image = r.get("image")
             add({
                 "id": item_id("article", r.get("url")),
                 "type": "article",
@@ -268,8 +456,15 @@ def build_items(run, primary_code, rival_codes):
                 "author_handle": None,
                 "author_name": clean_text(r.get("author")),
                 "team": None,
-                "media": [],
+                # The fetchers extract one image per article; the app reads media[0].url.
+                "media": [{"type": "photo", "url": image}] if image else [],
+                "source_rank": ranks.get(sid, DEFAULT_SOURCE_RANK),
             }, ("article", r.get("url")))
+
+    items, merged = cluster_articles(items)
+    article_count = sum(1 for i in items if i["type"] == "article")
+    print(f"article clustering: {article_count + merged} articles → {article_count} items "
+          f"({merged} merged into a higher-ranked source)")
 
     items.sort(key=lambda i: i["published_at"], reverse=True)
     return items, window_hours, article_window_hours
@@ -311,11 +506,12 @@ def main():
 
     with open(run_path) as f:
         run = json.load(f)
-    primary, rivals, source_names = load_sources_config(args.sources)
+    primary, rivals, source_names, source_ranks = load_sources_config(args.sources)
     primary_code = primary.get("team_code", "BAL")
     rival_codes = [r.get("team_code") for r in rivals if r.get("team_code")]
 
-    items, window_hours, article_window_hours = build_items(run, primary_code, rival_codes)
+    items, window_hours, article_window_hours = build_items(
+        run, primary_code, rival_codes, source_ranks)
     for it in items:
         if not it["source_name"]:
             it["source_name"] = source_names.get(it["source_id"], it["source_id"])
