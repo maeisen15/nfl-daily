@@ -13,7 +13,24 @@ import { el } from "../lib/dom.js";
 import { store } from "../store.js";
 import { state, loadSchedule } from "../data.js";
 
-const RIVAL_TEAMS = ["PIT", "CIN", "CLE", "KC", "BUF"];
+/* Which teams a scope covers, from config.json — the Rivals scope names its own teams, so
+ * adding one is a config change rather than a code change. */
+function resultLetter(mine, other) {
+  if (mine?.score === other?.score) return "T";
+  return mine?.winner ? "W" : "L";
+}
+
+function resultClass(mine, other) {
+  if (mine?.score === other?.score) return "";
+  return mine?.winner ? "is-win" : "is-loss";
+}
+
+function teamsForScope(scope) {
+  const entry = (state.config?.scopes || []).find(s => s.code === scope);
+  if (!entry) return null;
+  if (entry.teams?.length) return entry.teams;
+  return entry.role === "national" ? null : [scope];
+}
 
 export function renderSchedule(params) {
   const wrap = el("div", { class: "schedule" });
@@ -38,10 +55,10 @@ function build(data, params) {
   if (team) return [tabs("games"), teamSeason(data, team, true)];
   // Following one team, the season is the useful view — week paging would make you hunt for
   // the one game that matters. The league scopes are the other way round.
-  const scope = store.scope;
-  if (scope && scope !== "national" && scope !== "rivals") {
-    return [tabs("games"), teamSeason(data, scope, false)];
-  }
+  // A scope covering exactly one team opens on that team's season; the league scopes and the
+  // multi-team Rivals scope open on the week.
+  const only = teamsForScope(store.scope);
+  if (only?.length === 1) return [tabs("games"), teamSeason(data, only[0], false)];
   return [tabs("games"), weekView(data, params)];
 }
 
@@ -64,8 +81,7 @@ function weekView(data, params) {
   const week = weeks[index];
   if (!week) return el("div", { class: "empty", text: "No games scheduled." });
 
-  const scope = store.scope;
-  const only = scope === "rivals" ? RIVAL_TEAMS : scope === "national" ? null : [scope];
+  const only = teamsForScope(store.scope);
   const games = only
     ? week.games.filter(g => only.includes(g.home?.abbr) || only.includes(g.away?.abbr))
     : week.games;
@@ -180,8 +196,8 @@ function teamSeason(data, abbr, canBack) {
       teamLogo(other?.abbr),
       el("span", { class: "fixture-team", text: other?.name || other?.abbr || "" }),
       done
-        ? el("span", { class: `fixture-result ${mine?.winner ? "is-win" : "is-loss"}`,
-            text: `${mine?.winner ? "W" : "L"} ${mine?.score}-${other?.score}` })
+        ? el("span", { class: `fixture-result ${resultClass(mine, other)}`,
+            text: `${resultLetter(mine, other)} ${mine?.score}-${other?.score}` })
         // Kickoff time, not just the date: knowing a game is Sunday night is most of what the
         // schedule is for.
         : el("span", { class: "fixture-when" },

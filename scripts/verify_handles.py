@@ -105,6 +105,8 @@ def collect_handles(config: dict) -> list[tuple[str, str]]:
             seen.add(handle.lower())
             out.append((handle, where))
 
+    for code, writer in (config.get("team_beat_writers") or {}).items():
+        add([writer], f"beat {code}")
     add(config.get("twitter_news_handles"), "national news")
     add(config.get("twitter_analysis_handles"), "national analysis")
     team = config.get("team_coverage") or {}

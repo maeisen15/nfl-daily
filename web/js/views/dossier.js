@@ -10,6 +10,7 @@
 
 import { el, safeUrl } from "../lib/dom.js";
 import { state, fetchOpponentTweets } from "../data.js";
+import { store, set, mergeTweets } from "../store.js";
 import { tweetRow, hydrateClamps } from "./tweet.js";
 
 const DAY_HEAD = { Wed: "Wed", Thu: "Thu", Fri: "Fri", Sat: "Sat", Sun: "Sun", Mon: "Mon", Tue: "Tue" };
@@ -74,15 +75,22 @@ function weather(wx) {
   if (wx.roof === "dome") {
     return section("Weather", el("div", { class: "dossier-note", text: `Indoors — ${wx.venue}.` }));
   }
+  if (wx.roof === "neutral") {
+    return section("Weather", el("div", { class: "dossier-note",
+      text: wx.venue ? `Neutral site — ${wx.venue}.` : "Neutral site." }));
+  }
   if (!wx.forecast) {
     return section("Weather",
       el("div", { class: "dossier-note", text: "Too far out for a forecast." }));
   }
   const f = wx.forecast;
+  // A missing value must not become a confident zero: Math.round(null) is 0, which would read
+  // as a real forecast of no wind.
+  const num = (v, suffix) => (typeof v === "number" ? `${Math.round(v)}${suffix}` : "—");
   const body = el("div", { class: "wx" },
-    wxCell(`${Math.round(f.temperature_f)}°`, "at kickoff"),
-    wxCell(`${Math.round(f.wind_mph)} mph`, "wind"),
-    wxCell(`${Math.round(f.precipitation_pct)}%`, "precipitation"),
+    wxCell(num(f.temperature_f, "°"), "at kickoff"),
+    wxCell(num(f.wind_mph, " mph"), "wind"),
+    wxCell(num(f.precipitation_pct, "%"), "precipitation"),
   );
   const note = wx.roof === "retractable"
     ? el("div", { class: "dossier-note", text: "Retractable roof." })
@@ -239,12 +247,15 @@ function opponentBeat(data) {
   const scroller = el("div", { class: "beat-scroll" },
     el("div", { class: "beat-loading", text: "Loading…" }));
 
-  fetchOpponentTweets(30).then(items => {
+  fetchOpponentTweets(beat.handle, 30).then(items => {
     if (!items.length) {
       scroller.replaceChildren(el("div", { class: "beat-loading",
         text: "Nothing from this week yet." }));
       return;
     }
+    // Into the store, so tapping one opens its detail view. These carry the `opponent` scope,
+    // which no feed filters on, so they cannot leak into a tab.
+    set({ tweets: mergeTweets(store.tweets, items) });
     scroller.replaceChildren(...items.map(t => tweetRow(t)));
     hydrateClamps(scroller);
   }).catch(() => {

@@ -362,7 +362,15 @@ def push(worker_url: str, secret: str, tweets: list[dict], handles: list[dict], 
         if i == 0:
             payload["handles"] = handles
             if requests_made:
-                payload["usage"] = {"requests": requests_made, "tweets": len(tweets)}
+                # Counted here rather than in the Worker: tweets go up in batches and only the
+                # first carries this payload, so the Worker would only ever see part of them.
+                by_handle: dict[str, int] = {}
+                for t in tweets:
+                    h = str(((t.get("author") or {}).get("userName") or "")).lower()
+                    if h:
+                        by_handle[h] = by_handle.get(h, 0) + 1
+                payload["usage"] = {"requests": requests_made, "tweets": len(tweets),
+                                    "by_handle": by_handle}
         res = http_json("POST", f"{worker_url}/push", payload,
                         headers={"Authorization": f"Bearer {secret}"})
         for k in totals:

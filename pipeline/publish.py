@@ -369,7 +369,6 @@ def build_items(run, primary_code, rival_codes, source_ranks=None):
     # Tweets, transactions, and injuries stay on the base (24h) window to match the digest.
     article_window_hours = int(os.environ.get("NFL_DAILY_ARTICLE_WINDOW_HOURS", ARTICLE_WINDOW_HOURS))
     article_cutoff = completed - timedelta(hours=article_window_hours)
-    tracked = {primary_code} | set(rival_codes)
     ranks = source_ranks or {}
 
     items, seen = [], set()
@@ -601,7 +600,10 @@ def main():
             [{"code": primary_code, "label": primary.get("display_name", primary_code),
               "short": (primary.get("display_name") or primary_code).split()[-1], "role": "primary"}]
             + [{"code": "national", "label": "NFL", "short": "NFL", "role": "national"}]
-            + ([{"code": RIVALS_SCOPE, "label": "Rivals", "short": "Rivals", "role": "rival"}]
+            + ([{"code": RIVALS_SCOPE, "label": "Rivals", "short": "Rivals", "role": "rival",
+                 # The schedule tab filters a week down to these teams, and reading them from
+                 # here means adding a rival needs no matching edit in the app.
+                 "teams": [r["team_code"] for r in rivals if r.get("team_code")]}]
                if rivals else [])
         ),
     })

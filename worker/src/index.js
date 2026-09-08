@@ -145,11 +145,11 @@ async function push(request, env) {
   // ledger. The caller reports its own request count because only it knows how many pages it
   // asked for; without that the month understates what was actually spent.
   if (body.usage && Number(body.usage.requests) > 0) {
-    const byHandle = new Map();
-    for (const t of raw) {
-      const h = String(t?.author?.userName || "").toLowerCase();
-      if (h) byHandle.set(h, (byHandle.get(h) || 0) + 1);
-    }
+    // The caller counts this, because tweets arrive here in batches and only the first carries
+    // the usage payload — tallying the batch in hand would undercount every backfill that
+    // needed more than one.
+    const byHandle = new Map(Object.entries(body.usage.by_handle || {})
+      .map(([h, n]) => [String(h).toLowerCase(), Number(n) || 0]));
     try {
       await recordUsage(env, new Date(), {
         polls: 0, requests: Number(body.usage.requests),
@@ -181,6 +181,22 @@ async function syncHandles(env, handles) {
     );
   }
   if (stmts.length) await env.DB.batch(stmts);
+
+  // The list is authoritative: a handle that has dropped out of sources.yaml — last week's
+  // opponent beat writer, most often — must stop being polled, or the poll query grows by one
+  // handle a week and keeps paying for tweets nobody asked for.
+  const keep = handles.map(h => String(h.handle || "").toLowerCase()).filter(Boolean);
+  if (keep.length) {
+    const CHUNK = 90;
+    let condition = "", binds = [];
+    for (let i = 0; i < keep.length; i += CHUNK) {
+      const slice = keep.slice(i, i + CHUNK);
+      condition += `${condition ? " AND " : ""}handle NOT IN (${slice.map(() => "?").join(",")})`;
+      binds = binds.concat(slice);
+    }
+    const gone = await env.DB.prepare(`DELETE FROM handles WHERE ${condition}`).bind(...binds).run();
+    if (gone.meta?.changes) console.log(`dropped ${gone.meta.changes} handle(s) no longer watched`);
+  }
   return stmts.length;
 }
 
@@ -675,7 +691,10 @@ async function getInjuries(env, url, origin) {
     .split(",").map(t => t.trim().toUpperCase()).filter(Boolean).slice(0, 8);
   if (!teams.length) return json({ error: "teams= required" }, 400, env, origin);
   const days = Math.min(21, Math.max(1, Number(url.searchParams.get("days")) || 8));
-  const since = isoDaysAgo(days).slice(0, 10);
+  // An explicit `since` is how the caller says "this game week only" — a fixed window would
+  // put last Wednesday's column beside this Wednesday's.
+  const asked = url.searchParams.get("since") || "";
+  const since = /^\d{4}-\d{2}-\d{2}$/.test(asked) ? asked : isoDaysAgo(days).slice(0, 10);
 
   const res = await env.DB.prepare(
     `SELECT day, team, player, position, injury, practice, status
@@ -829,6 +848,7 @@ function absoluteUrl(value, base) {
 
 async function getTweets(request, env, url, origin) {
   const scope = url.searchParams.get("scope") || "";
+  const handle = (url.searchParams.get("handle") || "").toLowerCase().replace(/^@/, "");
   const hours = clampInt(url.searchParams.get("hours"), DEFAULT_HOURS, 1, 24 * RETENTION_DAYS);
   const limit = clampInt(url.searchParams.get("limit"), DEFAULT_PAGE, 1, MAX_LIMIT);
   const cursor = parseCursor(url.searchParams.get("cursor"));
@@ -845,6 +865,10 @@ async function getTweets(request, env, url, origin) {
       WHERE t.published_at >= ?`;
   const binds = [since];
   if (scope) { sql += " AND h.scope = ?"; binds.push(scope); }
+  // By author, for the dossier's beat-writer box: this week's opponent may also be a rival
+  // watched year-round, in which case their scope is `rivals` and asking by scope finds
+  // nothing.
+  if (handle) { sql += " AND LOWER(t.author_handle) = ?"; binds.push(handle); }
   // Keyset pagination on the same key the index is sorted by, so page N costs the same as page
   // one — OFFSET would make deep scrollback progressively slower.
   if (cursor) {

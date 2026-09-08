@@ -333,6 +333,10 @@ def _load_tweets_from_worker(hours: int) -> tuple[dict[str, Any], list[dict[str,
             feeds["ravens"].append(entry)
         elif scope == "national":
             feeds["national"].append(entry)
+        elif scope == "opponent":
+            # This week's opposing beat writer. Watched so the game-week dossier can show their
+            # week, and deliberately in no tab — the rivals bucket would put them in one.
+            continue
         else:
             feeds["rivals"].setdefault(scope, []).append(entry)
 

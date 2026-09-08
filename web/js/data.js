@@ -37,11 +37,13 @@ export async function loadStatic() {
 
 /* This week's opponent beat writer, scoped so it never appears in a feed. Fetched when the
  * Brief is opened rather than baked into gameweek.json, which every app launch loads. */
-export async function fetchOpponentTweets(limit = 30) {
+export async function fetchOpponentTweets(handle, limit = 30) {
   const base = (state.config?.tweets_url || "").replace(/\/$/, "");
-  if (!base) return [];
+  if (!base || !handle) return [];
   const url = new URL(`${base}/tweets`);
-  url.searchParams.set("scope", "opponent");
+  // By author, not by scope: a rival who is also this week's opponent stays scoped `rivals`,
+  // and asking for the opponent scope would come back empty for those weeks.
+  url.searchParams.set("handle", handle);
   url.searchParams.set("hours", "168");
   url.searchParams.set("limit", String(limit));
   const body = await fetchJson(url.toString());

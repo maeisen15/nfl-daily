@@ -22,7 +22,7 @@ import json
 import os
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -73,7 +73,7 @@ def main() -> int:
     schedule = load_schedule()
     if not schedule:
         return 1
-    game, week_label = next_game(schedule, args.team)
+    game, week_label, previous = next_game(schedule, args.team)
     if not game:
         print("no upcoming game for this team — writing an empty dossier", file=sys.stderr)
         write(args.out, {"schema_version": SCHEMA_VERSION,
@@ -93,7 +93,7 @@ def main() -> int:
         "game": game,
         # Away on the left, home on the right, which is how a matchup is written everywhere.
         "stats": team_stats(away["abbr"], home["abbr"]),
-        "injuries": injuries(args.team, opponent),
+        "injuries": injuries(args.team, opponent, previous),
         "weather": weather(game),
         "previews": previews(game, args.team, opponent),
         "opponent_beat": beat_writer(opponent),
@@ -110,20 +110,23 @@ def load_schedule() -> dict | None:
         return None
 
 
-def next_game(schedule: dict, team: str) -> tuple[dict | None, str]:
-    """The game still to be played, or the most recent one once the season ends.
+def next_game(schedule: dict, team: str) -> tuple[dict | None, str, dict | None]:
+    """The game still to be played, the week it falls in, and the one before it.
 
     Deliberately not "the current week's game": a team on a bye still has a next opponent, and
-    a dossier about nothing is worse than one that looks ahead."""
+    a dossier about nothing is worse than one that looks ahead. The previous game is what bounds
+    the injury grid to a single week."""
     played = None
     for week in schedule.get("weeks") or []:
         for game in week.get("games") or []:
             if team not in (game["home"]["abbr"], game["away"]["abbr"]):
                 continue
             if game.get("state") != "post":
-                return game, week.get("label", "")
+                return game, week.get("label", ""), (played[0] if played else None)
             played = (game, week.get("label", ""))
-    return played if played else (None, "")
+    if played:
+        return played[0], played[1], None
+    return None, "", None
 
 
 def team_stats(away: str, home: str) -> dict | None:
@@ -227,14 +230,19 @@ def fmt(value) -> str:
     return f"{value:.1f}" if isinstance(value, float) else str(value)
 
 
-def injuries(team: str, opponent: str) -> dict | None:
+def injuries(team: str, opponent: str, previous: dict | None) -> dict | None:
     worker = (os.environ.get("NFL_DAILY_WORKER_URL") or "").rstrip("/")
     if not worker:
         print("warn: NFL_DAILY_WORKER_URL not set — no injury grid", file=sys.stderr)
         return None
+    params = {"teams": f"{team},{opponent}", "days": 8}
+    # The grid covers one game week. Without this bound a Wednesday run shows last Wednesday's
+    # column beside this one, which reads as two contradictory reports for the same player.
+    last = parse_iso((previous or {}).get("date"))
+    if last:
+        params["since"] = (last.date() + timedelta(days=1)).isoformat()
     try:
-        res = requests.get(f"{worker}/injuries",
-                           params={"teams": f"{team},{opponent}", "days": 8}, timeout=TIMEOUT)
+        res = requests.get(f"{worker}/injuries", params=params, timeout=TIMEOUT)
         res.raise_for_status()
         return res.json()
     except requests.RequestException as err:
@@ -247,6 +255,8 @@ def weather(game: dict) -> dict | None:
 
     A retractable roof still gets a forecast: whether it is open is a game-day decision, so the
     weather is what decides it rather than being irrelevant."""
+    if game.get("neutral"):
+        return {"roof": "neutral", "venue": game.get("venue")}
     venue = STADIUMS.get(game["home"]["abbr"])
     if not venue:
         return None
