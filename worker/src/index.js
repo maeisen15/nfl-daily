@@ -29,6 +29,7 @@ const DEFAULT_PAGE = 200;
 const LINK_CARDS_PER_POLL = 12;
 const LINK_FETCH_TIMEOUT_MS = 4000;
 const LINK_CARD_RETRY_DAYS = 7;
+const LINK_CARD_KEEP_DAYS = 30;
 
 // Cron strings, mirrored from wrangler.toml. scheduled() routes on these.
 const CRON_POLL  = "*/5 * * * *";
@@ -63,7 +64,9 @@ export default {
     if (event.cron === CRON_PRUNE) return await prune(env);
     // Default to the poll: an unrecognised cron is likelier a wrangler.toml edit than a prune,
     // and skipping ingest is a worse failure than pruning twice.
-    return await poll(env, new Date());
+    // The tick's own scheduled time, not now: Cloudflare can deliver a cron a minute late,
+    // and reading the clock instead would silently drop that run's ingest.
+    return await poll(env, new Date(event.scheduledTime || Date.now()));
   },
 };
 
@@ -74,6 +77,12 @@ async function prune(env) {
   const cutoff = isoDaysAgo(RETENTION_DAYS);
   const res = await env.DB.prepare("DELETE FROM tweets WHERE published_at < ?").bind(cutoff).run();
   console.log(`pruned ${res.meta?.changes ?? 0} tweets older than ${cutoff}`);
+
+  // Link cards outlive the tweets that referenced them. Nothing older than this window can
+  // still be on screen, and a URL that comes back is simply fetched again.
+  const cards = await env.DB.prepare("DELETE FROM link_cards WHERE fetched_at < ?")
+    .bind(isoDaysAgo(LINK_CARD_KEEP_DAYS)).run();
+  console.log(`pruned ${cards.meta?.changes ?? 0} link cards`);
 }
 
 /* ---------- write paths ---------- */
@@ -422,14 +431,20 @@ async function refreshLinkCards(env, urls) {
   // Anything already resolved is done. A previous failure is retried, but only weekly — a
   // paywall or a dead host would otherwise be re-fetched on every poll for as long as the
   // tweet stands.
-  const placeholders = urls.map(() => "?").join(",");
-  const known = await env.DB.prepare(
-    `SELECT url, status, fetched_at FROM link_cards WHERE url IN (${placeholders})`
-  ).bind(...urls).all();
   const retryBefore = isoDaysAgo(LINK_CARD_RETRY_DAYS);
   const done = new Set();
-  for (const r of known.results || []) {
-    if (r.status === "ok" || r.fetched_at > retryBefore) done.add(r.url);
+  // D1 caps bound parameters per statement. A poll after the overnight gap carries a whole
+  // night of links, so this has to chunk rather than bind them all at once.
+  const CHUNK = 90;
+  for (let i = 0; i < urls.length; i += CHUNK) {
+    const slice = urls.slice(i, i + CHUNK);
+    const known = await env.DB.prepare(
+      `SELECT url, status, fetched_at FROM link_cards
+        WHERE url IN (${slice.map(() => "?").join(",")})`
+    ).bind(...slice).all();
+    for (const r of known.results || []) {
+      if (r.status === "ok" || r.fetched_at > retryBefore) done.add(r.url);
+    }
   }
 
   const todo = urls.filter(u => !done.has(u)).slice(0, LINK_CARDS_PER_POLL);

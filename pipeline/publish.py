@@ -304,10 +304,10 @@ def cluster_articles(items):
     distinctive = {tok for tok, df in doc_freq.items() if df <= distinctive_max_df}
 
     # Best source first, then newest — the leader of each cluster is the article that survives.
-    order = sorted(
-        articles,
-        key=lambda a: (a.get("source_rank", DEFAULT_SOURCE_RANK), a.get("published_at") or ""),
-    )
+    # Two stable passes rather than one key, because the two fields sort in opposite
+    # directions: best source wins, and among equals the newest telling of the story leads.
+    order = sorted(articles, key=lambda a: a.get("published_at") or "", reverse=True)
+    order.sort(key=lambda a: a.get("source_rank", DEFAULT_SOURCE_RANK))
 
     leaders_by_scope = {}   # scope key -> list of leader articles
     members = {}            # id(leader) -> count

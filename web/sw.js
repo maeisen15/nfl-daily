@@ -1,10 +1,14 @@
 /* NFL Daily service worker.
  *
- * Data (the app's JSON and the Worker's tweets) is network-first, so an online app is always
- * current and an offline one still has the last feed. The shell is stale-while-revalidate, so
- * the app opens instantly from cache and picks up a deploy on the following open.
+ * The app's own JSON is network-first, so an online app is current and an offline one still
+ * has the last articles and brief. The shell is stale-while-revalidate, so the app opens
+ * instantly from cache and picks up a deploy on the following open.
+ *
+ * Tweets are deliberately not cached here. They are paged, so every page shares one URL path
+ * and they would overwrite each other; and data.js already keeps its own ordered copy of the
+ * newest tweets in localStorage. Letting the request fail is what hands the app to that copy.
  */
-const SHELL = "nfl-daily-shell-v11";
+const SHELL = "nfl-daily-shell-v12";
 const SHELL_FILES = [
   "index.html", "app.css", "manifest.webmanifest",
   "js/main.js", "js/data.js", "js/store.js", "js/router.js",
@@ -27,37 +31,38 @@ self.addEventListener("activate", (e) => {
 
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
-  // Live tweets come from the Worker on another origin. Cache them the same way as /data/ so
-  // the Tweets tab still has something to show on a plane or a dead cell.
-  const isLiveTweets = url.hostname.endsWith(".workers.dev") && url.pathname === "/tweets";
-  if (url.origin !== location.origin && !isLiveTweets) return;
-  if (isLiveTweets || url.pathname.includes("/data/")) {
-    // network-first: fresh feed when online, last cached feed when offline
+  if (url.origin !== location.origin) return;
+
+  if (url.pathname.includes("/data/")) {
+    // network-first: the current data when online, the last copy when not. Keyed without the
+    // cache-busting query, or every load would store a new entry and match none of them.
+    const key = stripQuery(e.request);
     e.respondWith(
       fetch(e.request).then(res => {
         const copy = res.clone();
-        caches.open(SHELL).then(c => c.put(stripQuery(e.request), copy));
+        e.waitUntil(caches.open(SHELL).then(c => c.put(key, copy)));
         return res;
-      }).catch(() => caches.match(stripQuery(e.request)))
+      }).catch(() => caches.match(key))
     );
-  } else {
-    // Stale-while-revalidate for the shell. Cache-first alone was wrong: it pinned the app to
-    // whatever was cached and made every deploy invisible until this file's version string
-    // changed by hand. Answering from cache keeps the app opening instantly; refreshing the
-    // entry in the background means the next open is current, with no version bump needed.
-    e.respondWith(
-      caches.match(e.request).then(hit => {
-        const fresh = fetch(e.request).then(res => {
-          if (res && res.ok && res.type === "basic") {
-            const copy = res.clone();
-            caches.open(SHELL).then(c => c.put(e.request, copy));
-          }
-          return res;
-        }).catch(() => hit);
-        return hit || fresh;
-      })
-    );
+    return;
   }
+
+  // Stale-while-revalidate for the shell. Cache-first alone was wrong: it pinned the app to
+  // whatever was cached and made every deploy invisible until this file's version string
+  // changed by hand. Answering from cache keeps the app opening instantly; refreshing the
+  // entry in the background means the next open is current, with no version bump needed.
+  e.respondWith(
+    caches.match(e.request).then(hit => {
+      const fresh = fetch(e.request).then(res => {
+        if (res && res.ok && res.type === "basic") {
+          const copy = res.clone();
+          e.waitUntil(caches.open(SHELL).then(c => c.put(e.request, copy)));
+        }
+        return res;
+      }).catch(() => hit);
+      return hit || fresh;
+    })
+  );
 });
 
 function stripQuery(req) {

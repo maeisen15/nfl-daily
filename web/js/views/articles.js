@@ -35,10 +35,10 @@ export function renderArticles(scope) {
  * signal for whether it's worth opening. */
 function articleRow(item) {
   const image = safeUrl((item.media || [])[0]?.url);
-  const row = el("a", {
+  const href = safeUrl(item.url);
+  const row = el(href ? "a" : "div", {
     class: `article${image ? "" : " no-image"}`,
-    href: safeUrl(item.url) || "#",
-    target: "_blank", rel: "noopener",
+    ...(href ? { href, target: "_blank", rel: "noopener" } : {}),
   },
     el("div", { class: "article-mark" },
       sourceMark(item),

@@ -53,7 +53,9 @@ async function boot() {
     offline: data.state.offline,
   });
   renderStatus();
-  if (parse().name === "tweets") render(parse());
+  // Every view is re-rendered, not just the feed: the app reopens on whatever URL it was left
+  // on, and a detail view drawn before the tweets arrived would otherwise stay empty forever.
+  render(parse());
 
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 

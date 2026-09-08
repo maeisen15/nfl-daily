@@ -21,6 +21,9 @@ export function renderFeed(scope) {
       text: store.offline
         ? "No tweets cached for this view. Reconnect to load the latest."
         : "No tweets in this window." }));
+    // A quiet scope can be empty only because its tweets sit deeper than the first page, so
+    // the sentinel still has to be here to pull them in.
+    if (!store.exhausted && !store.offline) wrap.appendChild(el("div", { class: "spinner", id: "feed-sentinel" }));
     return wrap;
   }
 

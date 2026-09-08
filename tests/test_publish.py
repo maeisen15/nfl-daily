@@ -189,6 +189,18 @@ clustered, merged = publish.cluster_articles([dict(a) for a in SAME_URL])
 check("the same URL is the same story regardless of title",
       len(clustered) == 1 and clustered[0]["source_id"] == "espn_nfl")
 
+# Two tellings of one story from equally-ranked outlets: the later one is the one that knows
+# how it ended, and it is the one the reader should get.
+SAME_RANK = [
+    article("cbs_nfl", 30, "Ravens place kicker Justin Tucker on injured reserve",
+            "https://cbssports.com/7", published="2026-07-26T09:00:00+00:00"),
+    article("fox_nfl", 30, "Ravens put kicker Justin Tucker on injured reserve",
+            "https://foxsports.com/7", published="2026-07-26T15:00:00+00:00"),
+]
+clustered, merged = publish.cluster_articles([dict(a) for a in SAME_RANK])
+check("among equal ranks the newest telling leads",
+      len(clustered) == 1 and clustered[0]["source_id"] == "fox_nfl")
+
 NEAR_MISS = [
     article("espn_nfl", 20, "Cowboys Pro Bowl guard Tyler Smith headed for injured reserve",
             "https://espn.com/6"),
