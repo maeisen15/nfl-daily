@@ -738,7 +738,17 @@ function str(v) {
  * fetch. Cloudflare's outbound requests are free, and each URL is fetched exactly once and
  * then served from D1 forever after. */
 async function refreshLinkCards(env, urls) {
-  if (!urls.length) return 0;
+  // This poll's own new links come first, and whatever room is left goes to links still
+  // carrying no card. Without that top-up the retry window below is a window onto nothing: a
+  // URL is only ever offered here by the poll that first saw its tweet, so one failed attempt
+  // — a slow host, a bot wall we have since learned how to get past — was permanent.
+  const queue = [...new Set(urls)];
+  if (queue.length < LINK_CARDS_PER_POLL) {
+    for (const url of await uncardedLinks(env, LINK_CARDS_PER_POLL * 4)) {
+      if (!queue.includes(url)) queue.push(url);
+    }
+  }
+  if (!queue.length) return 0;
 
   // Anything already resolved is done. A previous failure is retried, but only weekly — a
   // paywall or a dead host would otherwise be re-fetched on every poll for as long as the
@@ -748,8 +758,8 @@ async function refreshLinkCards(env, urls) {
   // D1 caps bound parameters per statement. A poll after the overnight gap carries a whole
   // night of links, so this has to chunk rather than bind them all at once.
   const CHUNK = 90;
-  for (let i = 0; i < urls.length; i += CHUNK) {
-    const slice = urls.slice(i, i + CHUNK);
+  for (let i = 0; i < queue.length; i += CHUNK) {
+    const slice = queue.slice(i, i + CHUNK);
     const known = await env.DB.prepare(
       `SELECT url, status, fetched_at FROM link_cards
         WHERE url IN (${slice.map(() => "?").join(",")})`
@@ -759,7 +769,7 @@ async function refreshLinkCards(env, urls) {
     }
   }
 
-  const todo = urls.filter(u => !done.has(u)).slice(0, LINK_CARDS_PER_POLL);
+  const todo = queue.filter(u => !done.has(u)).slice(0, LINK_CARDS_PER_POLL);
   if (!todo.length) return 0;
 
   const cards = await Promise.all(todo.map(fetchOpenGraph));
@@ -773,6 +783,25 @@ async function refreshLinkCards(env, urls) {
   ).bind(c.url, c.title, c.description, c.image, c.domain, c.status, now)));
 
   return cards.length;
+}
+
+/* The first link of every tweet still inside the retention window, newest first. The caller
+ * drops the ones that already have a card or failed too recently to try again, so this walks
+ * steadily backwards through the backlog a dozen at a time rather than retrying the same few. */
+async function uncardedLinks(env, limit) {
+  const rows = await env.DB.prepare(
+    `SELECT links FROM tweets
+      WHERE links IS NOT NULL AND links != '[]' AND published_at >= ?
+      ORDER BY published_at DESC LIMIT 400`
+  ).bind(isoDaysAgo(RETENTION_DAYS)).all();
+
+  const out = [];
+  for (const r of rows.results || []) {
+    const first = safeParse(r.links, [])[0];
+    if (typeof first === "string" && first && !out.includes(first)) out.push(first);
+    if (out.length >= limit) break;
+  }
+  return out;
 }
 
 /* Reads the destination's Open Graph tags with HTMLRewriter, which streams the response rather
