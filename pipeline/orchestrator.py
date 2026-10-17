@@ -42,6 +42,7 @@ from fetchers import rss as rss_fetcher  # noqa: E402
 from fetchers import api as api_fetcher  # noqa: E402
 from fetchers import html as html_fetcher  # noqa: E402
 from fetchers import espn_api as espn_api_fetcher  # noqa: E402
+from worker import worker_base  # noqa: E402
 
 # Repo-local by default; NFL_DAILY_RUNTIME overrides (e.g. ~/.nfl-digest for the legacy setup).
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -296,9 +297,7 @@ def _load_tweets_from_worker(hours: int) -> tuple[dict[str, Any], list[dict[str,
     app falls back to whatever tweets the last good feed.json holds.
     """
     feeds: dict[str, Any] = {"national": [], "ravens": [], "rivals": {}}
-    worker_url = (os.environ.get("NFL_DAILY_WORKER_URL") or "").rstrip("/")
-    if not worker_url:
-        return feeds, [], "NFL_DAILY_WORKER_URL not set — no tweets in this run"
+    worker_url = worker_base()
 
     try:
         resp = requests.get(f"{worker_url}/tweets", params={"hours": hours, "limit": 500},

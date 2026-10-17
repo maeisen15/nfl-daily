@@ -31,6 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "pipeline"))
 
 from data.stadiums import STADIUMS  # noqa: E402
+from worker import worker_base  # noqa: E402
 
 SCHEDULE_FILE = REPO_ROOT / "web" / "data" / "schedule.json"
 FEED_FILE = REPO_ROOT / "web" / "data" / "feed.json"
@@ -231,10 +232,7 @@ def fmt(value) -> str:
 
 
 def injuries(team: str, opponent: str, previous: dict | None) -> dict | None:
-    worker = (os.environ.get("NFL_DAILY_WORKER_URL") or "").rstrip("/")
-    if not worker:
-        print("warn: NFL_DAILY_WORKER_URL not set — no injury grid", file=sys.stderr)
-        return None
+    worker = worker_base()
     params = {"teams": f"{team},{opponent}", "days": 8}
     # The grid covers one game week. Without this bound a Wednesday run shows last Wednesday's
     # column beside this one, which reads as two contradictory reports for the same player.

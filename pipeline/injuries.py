@@ -31,6 +31,10 @@ import requests
 from bs4 import BeautifulSoup
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "pipeline"))
+
+from worker import worker_base  # noqa: E402
+
 SECRETS_FILE = Path(os.path.expanduser(os.environ.get("NFL_DAILY_SECRETS", "~/.nfl-digest/secrets.env")))
 SCHEDULE_FILE = REPO_ROOT / "web" / "data" / "schedule.json"
 
@@ -72,10 +76,10 @@ def main() -> int:
                       f"{r['practice']:<8} {r['status']}", file=sys.stderr)
         return 0
 
-    worker = (os.environ.get("NFL_DAILY_WORKER_URL") or "").rstrip("/")
+    worker = worker_base()
     secret = load_secret("NFL_DAILY_PUSH_SECRET")
-    if not (worker and secret):
-        print("ERROR: NFL_DAILY_WORKER_URL and NFL_DAILY_PUSH_SECRET are required",
+    if not secret:
+        print("ERROR: NFL_DAILY_PUSH_SECRET is required to push practice reports",
               file=sys.stderr)
         return 1
 

@@ -121,7 +121,7 @@ never does. Do not report the run as complete until this passes.
 ## Failure handling
 
 - **Single-source errors:** proceed; they surface in the app's source-health section.
-- **`twitter_worker` in error:** the Worker was unreachable. Check `curl $NFL_DAILY_WORKER_URL/health`.
+- **`twitter_worker` in error:** the Worker was unreachable. Check `curl https://nfl-daily-tweets.maeisen15.workers.dev/health`.
   The digest goes out without tweets; the hourly refresh will restore them once the Worker is
   back. Report it.
 - **publish.py refused (exit 2):** the run was degraded. Do not commit — the last good data stays

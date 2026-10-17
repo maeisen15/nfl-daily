@@ -28,6 +28,10 @@ except ImportError:
     yaml = None
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(REPO_ROOT, "pipeline"))
+
+from worker import worker_base  # noqa: E402
+
 _RUNTIME = os.path.expanduser(os.environ.get("NFL_DAILY_RUNTIME", os.path.join(REPO_ROOT, "runtime")))
 DEFAULT_RUNS_DIR = os.path.join(_RUNTIME, "runs")
 DEFAULT_SOURCES = os.path.expanduser(
@@ -593,9 +597,9 @@ def main():
         "schema_version": SCHEMA_VERSION,
         "app_name": "NFL Daily",
         "default_scope": primary_code,
-        # Where the app reads live tweets. Empty means "no live source" and the app falls back
-        # to the tweets baked into feed.json by the last pipeline run.
-        "tweets_url": (os.environ.get("NFL_DAILY_WORKER_URL") or "").rstrip("/"),
+        # Where the app reads live tweets. Committed rather than env-only, so a run without
+        # NFL_DAILY_WORKER_URL can't blank it and strand the app on stale feed.json tweets.
+        "tweets_url": worker_base(),
         "scopes": (
             [{"code": primary_code, "label": primary.get("display_name", primary_code),
               "short": (primary.get("display_name") or primary_code).split()[-1], "role": "primary"}]

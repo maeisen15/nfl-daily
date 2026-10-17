@@ -44,6 +44,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SOURCES_FILE = Path(os.environ.get("NFL_DAILY_SOURCES", REPO_ROOT / "config" / "sources.yaml"))
 SECRETS_FILE = Path(os.path.expanduser(os.environ.get("NFL_DAILY_SECRETS", "~/.nfl-digest/secrets.env")))
 
+from worker import worker_base  # noqa: E402
+
 API_BASE = "https://api.twitterapi.io"
 TIMEOUT = 30
 # Advanced Search pages at 20. The daily reconciliation covers 26 hours, and a busy in-season
@@ -76,10 +78,10 @@ def main() -> int:
     if not api_key and args.mode != "sync-handles":
         print("ERROR: TWITTERAPI_IO_KEY not set (env or ~/.nfl-digest/secrets.env)", file=sys.stderr)
         return 1
-    worker_url = (os.environ.get("NFL_DAILY_WORKER_URL") or "").rstrip("/")
+    worker_url = worker_base()
     push_secret = load_secret("NFL_DAILY_PUSH_SECRET")
-    if not args.dry_run and not (worker_url and push_secret):
-        print("ERROR: NFL_DAILY_WORKER_URL and NFL_DAILY_PUSH_SECRET are required to push.",
+    if not args.dry_run and not push_secret:
+        print("ERROR: NFL_DAILY_PUSH_SECRET is required to push.",
               file=sys.stderr)
         print("       (Use --dry-run to fetch without pushing.)", file=sys.stderr)
         return 1
