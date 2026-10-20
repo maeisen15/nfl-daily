@@ -18,7 +18,12 @@ export const state = {
   offline: false,
 };
 
-export async function loadStatic() {
+/* How long a set of hourly files is considered current. Shorter than the hour they are built
+ * on, so a resume after any real gap picks the new ones up. */
+const STATIC_TTL_MS = 10 * 60_000;
+let lastStaticAt = 0;
+
+async function fetchStatic() {
   const bust = `?v=${Date.now()}`;
   const [config, feed, digest, gameweek] = await Promise.all([
     fetchJson(`data/config.json${bust}`),
@@ -32,7 +37,35 @@ export async function loadStatic() {
   state.feed = feed;
   state.digest = digest;
   state.gameweek = gameweek;
+  lastStaticAt = Date.now();
+}
+
+export async function loadStatic() {
+  await fetchStatic();
   return state;
+}
+
+/* The hourly rebuild only reaches the app if the app asks for these files again, and until
+ * now nothing ever did: they were read once at boot and never re-read. On an installed home
+ * screen app that is close to never — iOS suspends the page rather than killing it, so one
+ * page can live for weeks. Tweets kept polling and looked live, which is exactly what made
+ * the rest look current too: the articles, the brief, the schedule, the scores and the
+ * standings were all frozen at whatever they were the first time the app opened.
+ *
+ * Returns whether anything was actually re-read, so the caller only redraws when it was. A
+ * failure is not propagated: the files on screen are still good, and the next poll retries. */
+export async function refreshStatic({ force = false } = {}) {
+  if (!force && Date.now() - lastStaticAt < STATIC_TTL_MS) return false;
+  try {
+    await fetchStatic();
+    // The schedule is fetched lazily and memoised for the session, so it needs its own nudge.
+    // The old copy stays on screen until the new one lands, rather than blanking the tab.
+    schedulePromise = null;
+    loadSchedule().catch(() => {});
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /* This week's opponent beat writer, scoped so it never appears in a feed. Fetched when the
@@ -51,8 +84,8 @@ export async function fetchOpponentTweets(handle, limit = 30) {
 }
 
 /* The whole season is 125KB, which is not worth adding to every cold start for a tab that
- * may never be opened. Fetched once on first visit and kept for the session; the hourly
- * rebuild is picked up on the next app launch, which is soon enough for a schedule. */
+ * may never be opened. Fetched on first visit and held for the session; `refreshStatic`
+ * clears the hold so scores and standings follow the hourly rebuild. */
 let schedulePromise = null;
 
 export function loadSchedule() {

@@ -162,6 +162,9 @@ async function poll() {
     data.state.offline = true;
     renderStatus();
   }
+  // The hourly files, on their own much slower clock. Redraw only when something was actually
+  // re-read — a same-route render holds the scroll position, so this is safe mid-read.
+  if (await data.refreshStatic()) render(parse());
 }
 
 /* Held tweets go in the moment nothing would move under the reader: any view other than the
