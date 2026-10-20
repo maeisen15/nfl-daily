@@ -93,14 +93,32 @@ def main() -> int:
         "week_label": week_label,
         "game": game,
         # Away on the left, home on the right, which is how a matchup is written everywhere.
-        "stats": team_stats(away["abbr"], home["abbr"]),
-        "injuries": injuries(args.team, opponent, previous),
-        "weather": weather(game),
-        "previews": previews(game, args.team, opponent),
-        "opponent_beat": beat_writer(opponent),
+        "stats": safe("team stats", team_stats, away["abbr"], home["abbr"]),
+        "injuries": safe("injury grid", injuries, args.team, opponent, previous),
+        "weather": safe("weather", weather, game),
+        "previews": safe("previews", previews, game, args.team, opponent),
+        "opponent_beat": safe("opponent beat writer", beat_writer, opponent),
     }
     write(args.out, payload)
     return 0
+
+
+def safe(label: str, fn, *args):
+    """Run one dossier section, and let it fail alone.
+
+    Every section is a call out to someone else's service, and the payload above used to call
+    them all while building the dict — so a single raise meant nothing was written at all. The
+    workflow step carries `continue-on-error`, which made that silent, and the stale copy
+    committed in the repo shipped in its place. That is how the dossier sat on Week 1 against
+    the Colts for six weeks while the schedule beside it was current: ESPN refuses datacenter
+    IPs often enough that `team_stats` alone could cost the whole file, every hour, forever.
+
+    A missing section is a missing section. It is never worth the rest of the dossier."""
+    try:
+        return fn(*args)
+    except Exception as err:  # noqa: BLE001
+        print(f"warn: {label} unavailable: {err}", file=sys.stderr)
+        return None
 
 
 def load_schedule() -> dict | None:
