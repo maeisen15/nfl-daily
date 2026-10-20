@@ -1,4 +1,4 @@
-/* NFL Daily service worker.
+/* StreamWire service worker.
  *
  * The app's own JSON is network-first, so an online app is current and an offline one still
  * has the last articles and brief. The shell is stale-while-revalidate, so the app opens
@@ -8,7 +8,7 @@
  * and they would overwrite each other; and data.js already keeps its own ordered copy of the
  * newest tweets in localStorage. Letting the request fail is what hands the app to that copy.
  */
-const SHELL = "nfl-daily-shell-v19";
+const SHELL = "streamwire-shell-v20";
 const SHELL_FILES = [
   "index.html", "app.css", "manifest.webmanifest",
   "js/main.js", "js/data.js", "js/store.js", "js/router.js",

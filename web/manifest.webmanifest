@@ -1,6 +1,6 @@
 {
-  "name": "NFL Daily",
-  "short_name": "NFL Daily",
+  "name": "StreamWire",
+  "short_name": "StreamWire",
   "display": "standalone",
   "start_url": ".",
   "background_color": "#0E0D13",

@@ -595,7 +595,7 @@ def main():
 
     write("config.json", {
         "schema_version": SCHEMA_VERSION,
-        "app_name": "NFL Daily",
+        "app_name": "StreamWire",
         "default_scope": primary_code,
         # Where the app reads live tweets. Committed rather than env-only, so a run without
         # NFL_DAILY_WORKER_URL can't blank it and strand the app on stale feed.json tweets.

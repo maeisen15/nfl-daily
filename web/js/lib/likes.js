@@ -12,6 +12,11 @@
  * without any view knowing.
  */
 
+/* Keeps its original name through the rename to StreamWire, and has to: this key is where every
+ * like ever tapped actually lives. Renaming it migrates nothing — it points the app at an empty
+ * slot and the likes are gone. The app's three other browser-storage keys (scope, theme, the
+ * offline tweet cache) are stale-named for the same reason, and are cheaper to leave alone than
+ * to migrate for a string no one ever sees. */
 const KEY = "nfl-daily.likes.v1";
 
 let cache = null;
