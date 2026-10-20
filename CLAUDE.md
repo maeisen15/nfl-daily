@@ -67,4 +67,6 @@ Preview on a phone-sized frame before pushing: `python3 -m http.server 8000` ins
 open `/debug-frame.html`. Port 8000 matters — the Worker's CORS allowlist only accepts that one
 and the live site.
 
-Always ask before pushing.
+Push straight to `main` when the work is done — no PR, no asking first. The Pages deploy follows
+the push, so finish by confirming the live site actually serves the change rather than trusting
+that it shipped.
