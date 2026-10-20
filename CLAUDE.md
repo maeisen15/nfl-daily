@@ -67,6 +67,13 @@ Preview on a phone-sized frame before pushing: `python3 -m http.server 8000` ins
 open `/debug-frame.html`. Port 8000 matters — the Worker's CORS allowlist only accepts that one
 and the live site.
 
+Look at the layout rather than reasoning about it: `node scripts/shots.mjs all --local` renders
+every screen in real WebKit at iPhone size and writes PNGs to `screenshots/`. The Safari-only
+bugs this app keeps getting — a quoted card leaking text, an over-tall image, `-webkit-line-clamp`
+clipping against the wrong box — do not reproduce in Chromium, so this is the only way to see
+them without Matt's phone. It exits nonzero rather than write a screenshot of a screen that
+didn't render. Details in `docs/SCREENSHOTS.md`.
+
 Push straight to `main` when the work is done — no PR, no asking first. The Pages deploy follows
 the push, so finish by confirming the live site actually serves the change rather than trusting
 that it shipped.

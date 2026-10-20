@@ -5,3 +5,5 @@ secrets.env
 
 runtime/
 web/debug-frame.html
+node_modules/
+screenshots/

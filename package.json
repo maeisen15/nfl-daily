@@ -1,0 +1,9 @@
+{
+  "name": "nfl-daily-devtools",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Dev tooling only. The web app itself has no build step and no runtime dependencies.",
+  "devDependencies": {
+    "playwright-core": "1.57.0"
+  }
+}
