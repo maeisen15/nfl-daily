@@ -8,7 +8,7 @@
  * and they would overwrite each other; and data.js already keeps its own ordered copy of the
  * newest tweets in localStorage. Letting the request fail is what hands the app to that copy.
  */
-const SHELL = "nfl-daily-shell-v18";
+const SHELL = "nfl-daily-shell-v19";
 const SHELL_FILES = [
   "index.html", "app.css", "manifest.webmanifest",
   "js/main.js", "js/data.js", "js/store.js", "js/router.js",

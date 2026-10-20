@@ -186,6 +186,17 @@ img, video { display: block; max-width: 100%; }
 .tab svg { width: 23px; height: 23px; fill: currentColor; }
 .tab.is-active { color: var(--accent); }
 
+/* Both bars slide out of the way while scrolling down and return on the way up. Transform
+   rather than display, so nothing reflows and the feed cannot move under a thumb mid-read.
+   The masthead is sticky and the tab bar fixed, so each only has to clear its own edge. */
+.masthead, .tabbar { transition: transform .22s ease; }
+body.chrome-hidden .masthead { transform: translateY(-100%); }
+body.chrome-hidden .tabbar { transform: translateY(100%); }
+
+@media (prefers-reduced-motion: reduce) {
+  .masthead, .tabbar { transition: none; }
+}
+
 main {
   /* Clears the fixed tab bar plus its safe-area padding. */
   padding-bottom: calc(58px + var(--sab));
@@ -358,7 +369,17 @@ main {
 .quoted-handle { color: var(--muted); overflow: hidden; text-overflow: ellipsis; flex-shrink: 1000000; min-width: 0; }
 
 .quoted-text { padding: 2px 12px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.quoted-text.clamped { display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+/* `-webkit-line-clamp` clips at the content box, so the 12px of bottom padding sat below the
+   clip and let the sixth line show through it — a cut-off strip of text bleeding into the
+   card's border. Margin is outside the clip and does the same spacing job. */
+.quoted-text.clamped {
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  padding-bottom: 0;
+  margin-bottom: 12px;
+}
 
 /* A quoted tweet carrying one image renders as a small square thumbnail beside the text, not
    as a full-width photo — see docs/design-reference/twitter-feed-showmore.png. */
@@ -375,7 +396,9 @@ main {
   object-fit: cover;
   background: var(--bg-sunken);
 }
-.quoted-inline .quoted-text { padding: 0; }
+/* Beside a thumbnail the grid already supplies the padding, and the clamp's margin would
+   open a gap inside the cell. */
+.quoted-inline .quoted-text { padding: 0; margin-bottom: 0; }
 .quoted .media { margin: 8px 0 0; border: 0; border-radius: 0; }
 
 /* ---------- engagement row ---------- */

@@ -73,6 +73,7 @@ async function boot() {
   }, { passive: true });
   initPullToRefresh();
   initSwipe();
+  initChromeAutoHide();
 }
 
 /* ---------- routing ---------- */
@@ -111,7 +112,53 @@ function render(route = parse()) {
   } else {
     // A detail view opens at the top; a list returns to where it was left.
     window.scrollTo(0, route.name === "tweet" ? 0 : (store.scrollPositions[currentKey] || 0));
+    // The jump is not a scroll gesture, so it must not be read as one.
+    resetChrome();
   }
+}
+
+/* ---------- auto-hiding chrome ---------- */
+
+/* The masthead and the tab bar slide away while you are scrolling down and come back the
+ * moment you scroll up, which is how Twitter does it and is worth copying: between them they
+ * hold about a sixth of a phone screen, and on a feed you scroll for minutes that is a lot of
+ * reading room to spend on controls you are not using.
+ *
+ * Scroll events fire far faster than frames, so the work is deferred to one rAF. The chrome is
+ * pinned visible near the top — where the masthead is part of the page rather than something
+ * covering it — and tiny deltas are ignored so iOS rubber-banding at either end doesn't flicker
+ * it in and out. */
+const CHROME_DELTA = 6;
+const CHROME_PINNED_ABOVE = 60;
+
+let chromeLastY = 0;
+let chromeTicking = false;
+
+function setChromeHidden(hidden) {
+  document.body.classList.toggle("chrome-hidden", hidden);
+}
+
+function resetChrome() {
+  chromeLastY = Math.max(0, window.scrollY);
+  setChromeHidden(false);
+}
+
+function onChromeScroll() {
+  chromeTicking = false;
+  const y = Math.max(0, window.scrollY);
+  const dy = y - chromeLastY;
+  if (Math.abs(dy) < CHROME_DELTA) return;
+  chromeLastY = y;
+  setChromeHidden(y > CHROME_PINNED_ABOVE && dy > 0);
+}
+
+function initChromeAutoHide() {
+  resetChrome();
+  window.addEventListener("scroll", () => {
+    if (chromeTicking) return;
+    chromeTicking = true;
+    requestAnimationFrame(onChromeScroll);
+  }, { passive: true });
 }
 
 function back() {
