@@ -59,7 +59,6 @@ export function tweetRow(item, opts = {}) {
     textBlock(subject),
     mediaBlock(subject.media),
     quotedCard(item.quoted || subject.quoted),
-    linkCard(subject, !!(subject.media || []).length),
     actionsRow(item, subject),
   ));
 
@@ -102,13 +101,21 @@ export function displayName(name) {
 /* Twitter renders a tweet's own text with entities linkified and the t.co stub for its card,
  * quote or media removed — the stub is a duplicate of something already on screen. */
 function textBlock(subject) {
-  const text = stripStubs(subject.text || "");
+  const text = resolveStubs(subject);
   if (!text) return null;
   return el("div", { class: "tweet-text clamped" }, ...linkify(text));
 }
 
-function stripStubs(text) {
-  return text.replace(/\s*https:\/\/t\.co\/\S+/g, "").trim();
+/* Twitter leaves the author's own link in the text, as the shortened display URL, and strips
+ * only the stubs standing in for something already on screen — the media, or the quoted post.
+ * The link stubs come first and line up with `links` in order, so the first `links.length` of
+ * them expand and anything past that is one of those duplicates and goes. */
+function resolveStubs(subject) {
+  const links = subject.links || [];
+  let i = 0;
+  return String(subject.text || "")
+    .replace(/\s*https:\/\/t\.co\/\S+/g, () => (i < links.length ? ` ${links[i++]}` : ""))
+    .trim();
 }
 
 /* Mentions, hashtags and bare links become accented spans. Built as text nodes and elements,
@@ -138,10 +145,6 @@ export function linkify(text) {
   }
   if (last < text.length) out.push(text.slice(last));
   return out;
-}
-
-function hostOf(url) {
-  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return "link"; }
 }
 
 function prettyUrl(url) {
@@ -256,7 +259,7 @@ function quotedCard(quoted) {
     el("span", { class: "tweet-time", text: shortTime(quoted.published_at) }),
   ));
 
-  const text = stripStubs(quoted.text || "");
+  const text = resolveStubs(quoted);
   const media = quoted.media || [];
   const singlePhoto = media.length === 1 && !media[0].video_url && safeUrl(media[0].url);
 
@@ -272,41 +275,6 @@ function quotedCard(quoted) {
   return card;
 }
 
-/* Every outbound link stays reachable whether or not a preview was ever built for it. A
- * quarter of them never resolve — Substack and the Advance papers turn the fetch away, some
- * pages carry no Open Graph tags at all — and by the time the row renders, the tweet's own
- * text has had its t.co stub removed. Without a card of some kind the link is simply gone. */
-function linkCard(subject, compact) {
-  const card = subject.link_card || null;
-  const href = safeUrl(card && card.url) || safeUrl((subject.links || [])[0]);
-  if (!href) return null;
-  const image = card ? safeUrl(card.image) : null;
-  const title = (card && card.title) || prettyUrl(href);
-  // Three shapes: full width with the image on top, a thumbnail beside the text when the tweet
-  // already carries media of its own, and text alone when there is no image to show. The last
-  // one has to skip the thumbnail column, or the headline is squeezed into what's left of it.
-  const shape = !image ? " bare" : compact ? " compact" : "";
-  const node = el("a", {
-    class: `link-card${shape}`,
-    href, target: "_blank", rel: "noopener",
-    onclick: (e) => e.stopPropagation(),
-  },
-    image ? el("img", { src: image, alt: "", loading: "lazy", decoding: "async" }) : null,
-    el("div", { class: "link-card-body" },
-      el("div", { class: "link-card-domain", text: `From ${(card && card.domain) || hostOf(href)}` }),
-      title ? el("div", { class: "link-card-title", text: title }) : null,
-    ),
-  );
-  // A hotlink-protected or expired image would otherwise render as a broken-image glyph in a
-  // box. Drop it and let the card stand on its headline.
-  const img = node.querySelector("img");
-  if (img) img.addEventListener("error", () => {
-    img.remove();
-    node.classList.remove("compact");
-    node.classList.add("bare");
-  }, { once: true });
-  return node;
-}
 
 /* Counts are a snapshot from when the tweet was fetched and never change, so only the heart is
  * a control. The rest are read-outs, and the X icon is the way out to the real post. */
@@ -371,15 +339,13 @@ export function tweetDetail(item) {
     ),
   ));
 
-  const text = stripStubs(subject.text || "");
+  const text = resolveStubs(subject);
   if (text) body.appendChild(el("div", { class: "detail-text" }, ...linkify(text)));
 
   const media = mediaBlock(subject.media);
   if (media) body.appendChild(media);
   const quoted = quotedCard(item.quoted || subject.quoted);
   if (quoted) body.appendChild(quoted);
-  const card = linkCard(subject, false);
-  if (card) body.appendChild(card);
 
   const views = compactCount(subject.view_count);
   body.appendChild(el("div", { class: "detail-meta" },
@@ -394,9 +360,13 @@ export function tweetDetail(item) {
 /* ---------- clamping ---------- */
 
 /* "Show more" only appears where the text is actually cut off, which can only be measured once
- * the element is laid out. Run after a render. */
+ * the element is laid out. Run after a render.
+ *
+ * Quoted posts are deliberately not in this list. Twitter clamps an embedded post with no
+ * affordance at all — you open it to read the rest — and giving it one here put a second,
+ * competing "Show more" inside a card that was already a single tap target. */
 export function hydrateClamps(root) {
-  for (const node of root.querySelectorAll(".tweet-text.clamped, .quoted-text.clamped")) {
+  for (const node of root.querySelectorAll(".tweet-text.clamped")) {
     if (node.dataset.checked) continue;
     node.dataset.checked = "1";
     if (node.scrollHeight <= node.clientHeight + 2) {

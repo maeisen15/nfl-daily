@@ -44,8 +44,24 @@ export function mergeTweets(existing, incoming) {
   return merged;
 }
 
+/* One post reaching the feed through five different reposters is five rows of the same tweet,
+ * and on a list this tightly curated that happens constantly — everyone covering the team
+ * reposts the same insider. Twitter shows such a post once, and so does this.
+ *
+ * The original always wins over a repost of it; otherwise the first repost met stands in for
+ * the rest, which in a newest-first list is the newest. Deduping here rather than in the store
+ * keeps `findTweet` and `threadFor` working against everything actually loaded. */
 export function tweetsForScope(scope) {
-  return store.tweets.filter(t => (t.scopes || []).includes(scope));
+  const inScope = store.tweets.filter(t => (t.scopes || []).includes(scope));
+  const originals = new Set(inScope.filter(t => !t.is_retweet).map(t => t.id));
+  const seen = new Set();
+  return inScope.filter(t => {
+    const subjectId = (t.is_retweet && t.retweeted && t.retweeted.id) || t.id;
+    if (t.is_retweet && originals.has(subjectId)) return false;
+    if (seen.has(subjectId)) return false;
+    seen.add(subjectId);
+    return true;
+  });
 }
 
 export function findTweet(id) {

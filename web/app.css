@@ -309,13 +309,16 @@ main {
 
 .media-item { position: relative; background: var(--bg-sunken); }
 .media-item img, .media-item video { width: 100%; height: 100%; object-fit: cover; }
-.media.count-1 .media-item img { max-height: 62vh; height: auto; object-fit: contain; }
+/* One tall portrait photo would otherwise run most of a screen. The cap sits on the cell so
+   it applies to the aspect-reserved box as well, and `contain` letterboxes the remainder. */
+.media.count-1 .media-item { max-height: 52vh; }
+.media.count-1 .media-item img { max-height: 52vh; height: auto; object-fit: contain; }
 
 /* A lone photo or player whose proportions the Worker recorded gets its box reserved inline,
    before the file has loaded. Nothing below it moves when the content finally arrives. */
 .media-item.boxed { background: #000; }
 .media-item.boxed img, .media-item.boxed video {
-  width: 100%; height: 100%; max-height: none; object-fit: contain;
+  width: 100%; height: 100%; object-fit: contain;
 }
 .media.count-2 .media-item, .media.count-3 .media-item, .media.count-4 .media-item { aspect-ratio: 1; }
 .media.count-3 .media-item:first-child { aspect-ratio: 1 / 2.01; }
@@ -355,9 +358,6 @@ main {
 .quoted-handle { color: var(--muted); overflow: hidden; text-overflow: ellipsis; flex-shrink: 1000000; min-width: 0; }
 
 .quoted-text { padding: 2px 12px 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
-/* The clamp toggle is inserted after the text, not inside it, so it has to be inset to match
-   the card rather than sitting against the border. */
-.quoted > .show-more { padding: 0 12px 12px; margin-top: -6px; }
 .quoted-text.clamped { display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* A quoted tweet carrying one image renders as a small square thumbnail beside the text, not
@@ -377,37 +377,6 @@ main {
 }
 .quoted-inline .quoted-text { padding: 0; }
 .quoted .media { margin: 8px 0 0; border: 0; border-radius: 0; }
-
-/* ---------- link preview card ---------- */
-
-.link-card {
-  display: block;
-  margin-top: 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius);
-  overflow: hidden;
-  color: inherit;
-}
-.link-card:active { background: var(--bg-hover); }
-.link-card img { width: 100%; aspect-ratio: 1.91; object-fit: cover; background: var(--bg-sunken); }
-.link-card-body { padding: 10px 12px; }
-.link-card-domain { font-size: 13px; color: var(--muted); }
-.link-card-title {
-  margin-top: 1px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-/* Compact form, used when the tweet already carries its own media. */
-.link-card.compact { display: grid; grid-template-columns: 84px 1fr; align-items: stretch; }
-.link-card.compact img { height: 100%; aspect-ratio: auto; }
-.link-card.compact .link-card-body { padding: 8px 12px; align-self: center; }
-
-/* No image to show — a paywall, a bot wall, a page with no Open Graph tags. The card is the
-   domain and the destination, which is all it needs to be to stay tappable. */
-.link-card.bare .link-card-body { padding: 10px 12px; }
-.link-card.bare .link-card-title { color: var(--muted); font-weight: 500; }
 
 /* ---------- engagement row ---------- */
 
