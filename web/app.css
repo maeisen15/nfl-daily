@@ -123,6 +123,60 @@ img, video { display: block; max-width: 100%; }
 }
 .wordmark span { color: var(--accent); }
 
+/* The wordmark doubles as the vertical switcher. The chevron is the only affordance it gains,
+ * and it disappears when there is nothing to switch to. */
+.wordmark-wrap { display: flex; min-width: 0; }
+.wordmark { display: flex; align-items: center; gap: 5px; }
+.wordmark-chev {
+  width: 16px; height: 16px;
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform .18s ease;
+}
+.wordmark.is-static .wordmark-chev { display: none; }
+.wordmark[aria-expanded="true"] .wordmark-chev { transform: rotate(180deg); }
+
+.vertical-menu {
+  position: absolute;
+  top: 100%;
+  left: var(--pad-x);
+  z-index: 30;
+  min-width: 190px;
+  padding: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, .18);
+}
+
+.vertical-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  padding: 11px 12px;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  text-align: left;
+}
+.vertical-item:active { background: var(--bg-hover); }
+.vertical-item.is-active { color: var(--accent); }
+.vertical-item svg {
+  width: 18px; height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@media (prefers-reduced-motion: reduce) { .wordmark-chev { transition: none; } }
+
 .masthead-side { margin-left: auto; display: flex; align-items: center; gap: 4px; }
 
 .status { font-size: 13px; color: var(--muted); }

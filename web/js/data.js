@@ -11,6 +11,7 @@ const PAGE = 200;
 
 export const state = {
   config: null,
+  vertical: null,     // the entry from config.verticals the app is currently showing
   feed: null,
   digest: null,
   gameweek: null,
@@ -18,22 +19,45 @@ export const state = {
   offline: false,
 };
 
+export function verticals() {
+  return state.config?.verticals || [];
+}
+
+export function findVertical(code) {
+  return verticals().find(v => v.code === code) || null;
+}
+
+/* Every per-vertical file lives under that vertical's own directory. Football's is still the
+ * root, because moving it would have meant changing the output path of four pipeline scripts
+ * to no visible end; a vertical added later gets a directory of its own. */
+function dataPath(name) {
+  const dir = (state.vertical?.data_dir || "data").replace(/\/$/, "");
+  return `${dir}/${name}`;
+}
+
 /* How long a set of hourly files is considered current. Shorter than the hour they are built
  * on, so a resume after any real gap picks the new ones up. */
 const STATIC_TTL_MS = 10 * 60_000;
 let lastStaticAt = 0;
 
+/* The config describes the whole app and is read once; everything else belongs to one vertical
+ * and is re-read whenever the vertical changes. */
+export async function loadConfig() {
+  state.config = await fetchJson(`data/config.json?v=${Date.now()}`);
+  return state.config;
+}
+
 async function fetchStatic() {
   const bust = `?v=${Date.now()}`;
-  const [config, feed, digest, gameweek] = await Promise.all([
-    fetchJson(`data/config.json${bust}`),
-    fetchJson(`data/feed.json${bust}`),
-    fetchJson(`data/digest.json${bust}`),
-    // Small, and the Brief opens on it — but the app has to work before this file has ever
-    // been written, so its absence is a missing section rather than a failed boot.
-    fetchJson(`data/gameweek.json${bust}`).catch(() => null),
+  // None of these is fatal. A vertical whose sources haven't been set up yet has no files at
+  // all, and that has to read as an empty feed rather than an app that won't open — you still
+  // need to be able to switch back out of it. A real outage fails config.json instead, which
+  // is fatal, so the "couldn't load" path still means what it says.
+  const [feed, digest, gameweek] = await Promise.all([
+    fetchJson(`${dataPath("feed.json")}${bust}`).catch(() => null),
+    fetchJson(`${dataPath("digest.json")}${bust}`).catch(() => null),
+    fetchJson(`${dataPath("gameweek.json")}${bust}`).catch(() => null),
   ]);
-  state.config = config;
   state.feed = feed;
   state.digest = digest;
   state.gameweek = currentDossier(gameweek);
@@ -57,6 +81,24 @@ function currentDossier(gw) {
 export async function loadStatic() {
   await fetchStatic();
   return state;
+}
+
+/* Point the app at a vertical and read its files. Everything cached for the old one is dropped
+ * rather than left to be filtered out later: the schedule is memoised for the session, and the
+ * dossier and digest are keyed by scopes that don't exist in the vertical being switched to. */
+export async function selectVertical(code) {
+  const next = findVertical(code) || verticals()[0] || null;
+  if (!next) throw new Error("config has no verticals");
+  if (state.vertical && state.vertical.code === next.code) return next;
+  state.vertical = next;
+  state.feed = null;
+  state.digest = null;
+  state.gameweek = null;
+  state.schedule = null;
+  schedulePromise = null;
+  lastStaticAt = 0;
+  await fetchStatic();
+  return next;
 }
 
 /* The hourly rebuild only reaches the app if the app asks for these files again, and until
@@ -104,7 +146,7 @@ let schedulePromise = null;
 
 export function loadSchedule() {
   if (!schedulePromise) {
-    schedulePromise = fetchJson(`data/schedule.json?v=${Date.now()}`)
+    schedulePromise = fetchJson(`${dataPath("schedule.json")}?v=${Date.now()}`)
       .then(data => { state.schedule = data; return data; })
       .catch(err => { schedulePromise = null; throw err; });
   }

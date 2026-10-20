@@ -12,3 +12,19 @@ export const REFRESH = "M12 4.5a7.5 7.5 0 1 0 7.2 9.6h-2.1A5.5 5.5 0 1 1 12 6.5c
 export const SUN     = "M12 7a5 5 0 1 1 0 10 5 5 0 0 1 0-10zm0-5.5 1.2 3.1-1.2.5-1.2-.5L12 1.5zm0 21-1.2-3.1 1.2-.5 1.2.5L12 22.5zM1.5 12l3.1-1.2.5 1.2-.5 1.2L1.5 12zm21 0-3.1 1.2-.5-1.2.5-1.2 3.1 1.2zM4.6 4.6l3 1.3-.8 1-2.2-2.3zm14.8 14.8-3-1.3.8-1 2.2 2.3zM19.4 4.6l-1.3 3-1-.8 2.3-2.2zM4.6 19.4l1.3-3 1 .8-2.3 2.2z";
 export const MOON    = "M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5 8.5 8.5 0 1 0 20.5 14.5z";
 export const DIM     = "M12 3a9 9 0 0 0 0 18V3z";
+
+/* Bottom-bar icons, keyed by the tab names a vertical lists in config.verticals[].tabs. The bar
+ * is built from that list, so a vertical with no season simply never asks for SCHEDULE. */
+export const TAB = {
+  tweets:   "M20 4H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h3v3.2L11.5 18H20a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z",
+  articles: "M5 3h9l5 5v13H5V3zm8 1.5V9h4.5L13 4.5zM7.5 12h9v1.6h-9V12zm0 3.4h9V17h-9v-1.6zm0-6.8h3.5v1.6H7.5V8.6z",
+  brief:    "M4 4.5h16v2.2H4V4.5zm0 4.6h16v2.2H4V9.1zm0 4.6h11v2.2H4v-2.2zm0 4.6h13v2.2H4v-2.2z",
+  schedule: "M7 2.5v2H5.5A2.5 2.5 0 0 0 3 7v12.5A2.5 2.5 0 0 0 5.5 22h13a2.5 2.5 0 0 0 2.5-2.5V7a2.5 2.5 0 0 0-2.5-2.5H17v-2h-2v2H9v-2H7zM5 10h14v9.5a.5.5 0 0 1-.5.5h-13a.5.5 0 0 1-.5-.5V10zm2.5 2v2h2v-2h-2zm4.5 0v2h2v-2h-2zm4.5 0v2h2v-2h-2zM7.5 15.5v2h2v-2h-2zm4.5 0v2h2v-2h-2z",
+};
+
+export const TAB_LABEL = {
+  tweets: "Tweets", articles: "Articles", brief: "Brief", schedule: "Schedule",
+};
+
+export const CHEVRON = "M7.2 9.6 12 14.4l4.8-4.8";
+export const CHECK   = "M4.5 12.5 9 17l10.5-10.5";

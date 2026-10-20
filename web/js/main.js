@@ -3,9 +3,11 @@
 import { el, icon } from "./lib/dom.js";
 import * as ICON from "./lib/icons.js";
 import { store, set, mergeTweets } from "./store.js";
-import { parse, go, onRoute, key as routeKey } from "./router.js";
+import { parse, go, onRoute, key as routeKey,
+         setVerticals, setActiveVertical, activeVertical } from "./router.js";
 import * as data from "./data.js";
-import { initTheme, renderScopes, renderTabs, renderStatus, scopeCodes } from "./views/chrome.js";
+import { initTheme, renderVerticals, renderScopes, renderTabs, renderStatus,
+         scopeCodes } from "./views/chrome.js";
 import { renderFeed, watchSentinel, hydrateFeed } from "./views/feed.js";
 import { renderDetail, hydrateDetail } from "./views/detail.js";
 import { renderArticles } from "./views/articles.js";
@@ -16,7 +18,10 @@ import { renderSchedule } from "./views/schedule.js";
 import { fetchTweets } from "./data.js";
 
 const main = document.getElementById("main");
-const SCOPE_KEY = "nfl-daily.scope";
+const VERTICAL_KEY = "nfl-daily.vertical";
+/* Scope is remembered per vertical — "Rivals" means nothing outside football. */
+const scopeKey = (code) => `nfl-daily.scope.${code}`;
+const LEGACY_SCOPE_KEY = "nfl-daily.scope";
 const POLL_MS = 60_000;
 const TOP_SLACK = 40;   // px from the top that still counts as "at the top"
 
@@ -27,8 +32,10 @@ boot();
 async function boot() {
   initTheme();
 
+  // The config names the verticals and nothing can be drawn without it, so this is the one
+  // fetch whose failure is the app failing. A vertical's own files are allowed to be missing.
   try {
-    await data.loadStatic();
+    await data.loadConfig();
   } catch {
     main.replaceChildren(el("div", { class: "empty",
       text: "Couldn't load. Check your connection and pull down to retry." }));
@@ -36,26 +43,25 @@ async function boot() {
   }
 
   const params = new URLSearchParams(location.search);
-  let saved = null;
-  try { saved = localStorage.getItem(SCOPE_KEY); } catch { /* storage disabled */ }
-  const wanted = params.get("scope") || saved;
-  store.scope = scopeCodes().includes(wanted) ? wanted : data.state.config.default_scope;
+  const codes = data.verticals().map(v => v.code);
+  // A hash names its own vertical, and beats the remembered one: that is what makes a shared
+  // or reloaded URL land where it points.
+  const hashFirst = (location.hash || "").replace(/^#\/?/, "").split(/[/?]/)[0];
+  const wanted = [hashFirst, params.get("vertical"), read(VERTICAL_KEY),
+                  data.state.config.default_vertical].find(c => codes.includes(c));
+  setVerticals(codes, wanted || codes[0]);
+  await data.selectVertical(activeVertical());
+  store.scope = pickScope(data.state.vertical, params.get("scope"));
 
+  normalizeHash();
+  renderVerticals(changeVertical);
   renderScopes(changeScope);
   onRoute(render);
   render(parse());
 
   // Tweets are fetched after the first paint so the shell and the articles tab are usable
   // immediately, rather than everything waiting on the Worker.
-  const page = await data.loadFirstTweets();
-  set({
-    tweets: mergeTweets([], page.items),
-    cursor: page.cursor,
-    exhausted: !page.cursor,
-    newestSeen: page.newest,
-    offline: data.state.offline,
-  });
-  renderStatus();
+  await loadTweets();
   // Every view is re-rendered, not just the feed: the app reopens on whatever URL it was left
   // on, and a detail view drawn before the tweets arrived would otherwise stay empty forever.
   render(parse());
@@ -168,10 +174,81 @@ function back() {
   else go("/tweets");
 }
 
+/* ---------- verticals ---------- */
+
+/* Put the vertical into a hash that doesn't name one — a bare load has no hash at all, and a
+ * hash saved before verticals existed names only its view. Without this the address bar
+ * disagrees with the screen, and copying the URL shares the wrong vertical. replaceState
+ * rather than go(), because arriving somewhere is not a navigation to come back from. */
+function normalizeHash() {
+  const raw = (location.hash || "").replace(/^#\/?/, "");
+  const first = raw.split(/[/?]/)[0];
+  if (data.verticals().some(v => v.code === first)) return;
+  history.replaceState(null, "", `#/${activeVertical()}/${raw}`);
+}
+
+
+function read(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
+function write(key, value) {
+  try { localStorage.setItem(key, value); } catch { /* storage disabled */ }
+}
+
+function pickScope(vertical, preferred) {
+  const codes = (vertical.scopes || []).map(s => s.code);
+  // The pre-verticals key held the football scope. Honour it once so the rename doesn't drop
+  // the user back on the primary team when they left the app reading Rivals.
+  const saved = read(scopeKey(vertical.code))
+    || (vertical.code === "nfl" ? read(LEGACY_SCOPE_KEY) : null);
+  return [preferred, saved].find(c => c && codes.includes(c))
+    || vertical.default_scope || codes[0];
+}
+
+/* Live tweets come from one Worker pool that has no idea verticals exist, so a vertical only
+ * asks for them if it says it has them. Until the Worker can separate them, a vertical without
+ * its own pool shows an empty feed rather than football's. */
+async function loadTweets() {
+  if (!data.state.vertical?.live_tweets) {
+    set({ tweets: [], pending: [], cursor: null, exhausted: true, newestSeen: null,
+          offline: false });
+    renderStatus();
+    return;
+  }
+  const page = await data.loadFirstTweets();
+  set({
+    tweets: mergeTweets([], page.items),
+    cursor: page.cursor,
+    exhausted: !page.cursor,
+    newestSeen: page.newest,
+    offline: data.state.offline,
+  });
+  renderStatus();
+}
+
+async function changeVertical(code) {
+  if (code === data.state.vertical?.code) return;
+  write(VERTICAL_KEY, code);
+  setActiveVertical(code);
+  await data.selectVertical(code);
+  store.scope = pickScope(data.state.vertical);
+  // Nothing survives the switch: scroll positions, held tweets and the loaded page all belong
+  // to the vertical being left.
+  store.scrollPositions = {};
+  set({ tweets: [], pending: [], cursor: null, exhausted: false, newestSeen: null });
+  renderVerticals(changeVertical);
+  renderScopes(changeScope);
+  go(`/${code}/tweets`);
+  render(parse());
+  await loadTweets();
+  render(parse());
+}
+
 function changeScope(code) {
   if (code === store.scope) return;
   store.scope = code;
-  try { localStorage.setItem(SCOPE_KEY, code); } catch { /* storage disabled */ }
+  write(scopeKey(data.state.vertical?.code || "nfl"), code);
   // Scroll positions are per scope as much as per route; keeping them would drop you into the
   // middle of a feed you haven't seen.
   store.scrollPositions = {};
@@ -191,6 +268,10 @@ function changeScope(code) {
  * scroll back to the top and the new posts are already there. */
 async function poll() {
   if (document.visibilityState !== "visible") return;
+  if (!data.state.vertical?.live_tweets) {
+    if (await data.refreshStatic()) render(parse());
+    return;
+  }
   try {
     const page = await fetchTweets({ limit: 60, since: true });
     const known = new Set(store.tweets.map(t => t.id));
@@ -226,6 +307,10 @@ function flushPending() {
 }
 
 async function refreshNow() {
+  if (!data.state.vertical?.live_tweets) {
+    if (await data.refreshStatic()) render(parse());
+    return;
+  }
   try {
     const page = await fetchTweets({ limit: 200, since: true });
     store.offline = false;

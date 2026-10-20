@@ -593,23 +593,52 @@ def main():
             json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
         print(f"wrote {path} ({os.path.getsize(path)//1024} KB)")
 
+    # One config describes the whole app, and the app discovers its verticals from it. Football's
+    # scopes are still derived from config/sources.yaml; a vertical this pipeline has no sources
+    # for declares itself here instead, and starts carrying real scopes the moment a run can
+    # build them. `data_dir` is where that vertical's feed.json and friends live — football's
+    # stayed at the root through the split so no pipeline output path had to move.
+    nfl_scopes = (
+        [{"code": primary_code, "label": primary.get("display_name", primary_code),
+          "short": (primary.get("display_name") or primary_code).split()[-1], "role": "primary"}]
+        + [{"code": "national", "label": "NFL", "short": "NFL", "role": "national"}]
+        + ([{"code": RIVALS_SCOPE, "label": "Rivals", "short": "Rivals", "role": "rival",
+             # The schedule tab filters a week down to these teams, and reading them from
+             # here means adding a rival needs no matching edit in the app.
+             "teams": [r["team_code"] for r in rivals if r.get("team_code")]}]
+           if rivals else [])
+    )
     write("config.json", {
         "schema_version": SCHEMA_VERSION,
         "app_name": "StreamWire",
-        "default_scope": primary_code,
         # Where the app reads live tweets. Committed rather than env-only, so a run without
         # NFL_DAILY_WORKER_URL can't blank it and strand the app on stale feed.json tweets.
         "tweets_url": worker_base(),
-        "scopes": (
-            [{"code": primary_code, "label": primary.get("display_name", primary_code),
-              "short": (primary.get("display_name") or primary_code).split()[-1], "role": "primary"}]
-            + [{"code": "national", "label": "NFL", "short": "NFL", "role": "national"}]
-            + ([{"code": RIVALS_SCOPE, "label": "Rivals", "short": "Rivals", "role": "rival",
-                 # The schedule tab filters a week down to these teams, and reading them from
-                 # here means adding a rival needs no matching edit in the app.
-                 "teams": [r["team_code"] for r in rivals if r.get("team_code")]}]
-               if rivals else [])
-        ),
+        "default_vertical": "nfl",
+        "verticals": [
+            {
+                "code": "nfl",
+                "label": "NFL",
+                "data_dir": "data",
+                "default_scope": primary_code,
+                "tabs": ["tweets", "articles", "brief", "schedule"],
+                "live_tweets": True,
+                "scopes": nfl_scopes,
+            },
+            {
+                "code": "politics",
+                "label": "Politics",
+                "data_dir": "data/politics",
+                "default_scope": "elections",
+                # No schedule: there is no season to page through.
+                "tabs": ["tweets", "articles", "brief"],
+                # The Worker holds one undifferentiated pool of football tweets. Until it can
+                # separate them by vertical, this one has no live feed of its own to ask for.
+                "live_tweets": False,
+                "scopes": [{"code": "elections", "label": "Elections",
+                            "short": "Elections", "role": "primary"}],
+            },
+        ],
     })
     write("feed.json", {
         "schema_version": SCHEMA_VERSION,
