@@ -1,17 +1,24 @@
-# Hourly refresh: articles, transactions, injuries — plus whatever tweets the Worker has
-# accumulated — published straight to Pages.
+# The only way anything reaches the live site.
+#
+# Articles, transactions, injuries, the schedule and the dossier are rebuilt here and deployed
+# together with the app. Pushes deploy through this workflow too, which is the point: a push that
+# published the checkout on its own would serve whatever web/data happened to be committed, and
+# those files are written at runtime, so "whatever was committed" means the day the feature
+# landed. That is exactly what went wrong between September and October — every push quietly
+# republished a Week 1 schedule over the top of the hourly run's work.
 #
 # Nothing is committed here. feed.json changes every hour and committing it would add roughly a
-# megabyte of git objects a day; the deploy artifact is built from the checkout plus the freshly
-# written web/data, so the live site is current without the history churn. The once-daily
-# synthesis run is what commits, and that is what keeps digest.json in the repo.
+# megabyte of git objects a day. The once-daily synthesis run is what commits, and that is what
+# keeps digest.json in the repo as a floor if a run ever fails outright.
 #
 # This costs nothing: article sources are RSS/HTML scrapes, reading tweets back from our own
 # Worker is free, and Actions minutes are unlimited on a public repo.
 
-name: Hourly refresh
+name: Refresh and deploy
 
 on:
+  push:
+    branches: [main]
   schedule:
     # :17 rather than :00 — GitHub's scheduler is heavily contended on the hour and delays runs.
     - cron: "17 * * * *"
@@ -22,11 +29,12 @@ permissions:
   pages: write
   id-token: write
 
-# Share the Pages group with the deploy workflow, but never cancel a run in flight: the daily
-# digest deploy must not be killed by an hourly refresh that happens to overlap it.
+# Every run rebuilds the data from scratch and deploys the result, so a newer run always
+# supersedes an older one and cancelling the one in flight loses nothing. Pushes cancel for that
+# reason; scheduled runs don't, so an hourly refresh can't be starved by a burst of commits.
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   refresh:
@@ -44,49 +52,71 @@ jobs:
           cache-dependency-path: pipeline/requirements.txt
 
       - name: Install dependencies
-        run: pip install -r pipeline/requirements.txt
+        run: python3 -m pip install -r pipeline/requirements.txt
 
       - name: Fetch sources
-        env:
-          NFL_DAILY_WORKER_URL: ${{ secrets.NFL_DAILY_WORKER_URL }}
         run: |
           mkdir -p runtime
           python3 pipeline/orchestrator.py --days 1 --summary-only
 
       - name: Publish app data
-        env:
-          NFL_DAILY_WORKER_URL: ${{ secrets.NFL_DAILY_WORKER_URL }}
         run: python3 pipeline/publish.py
 
-      # These three run after publish and never block the deploy: a failure here costs the app
-      # a section, where a failure that stopped the job would cost it the articles too. Each
+      # These run after publish and never block the deploy: a failure here costs the app a
+      # section, where a failure that stopped the job would cost it the articles too. Each
       # depends on the one before — injuries needs the schedule's team names, and the dossier
-      # needs both.
+      # needs both — so the dependents are gated on the schedule actually succeeding. Letting
+      # them run anyway is how the dossier spent six weeks rebuilding itself from a Week 1
+      # schedule and reporting success.
       - name: Refresh schedule and scores
+        id: schedule
         continue-on-error: true
         run: python3 pipeline/schedule.py
 
       # The opponent's beat writer joins the poll for the week they matter, so the handle list
       # has to be resynced once the schedule says who that is. Costs nothing.
       - name: Sync watched handles
+        id: handles
+        if: steps.schedule.outcome == 'success'
         continue-on-error: true
         env:
-          NFL_DAILY_WORKER_URL: ${{ secrets.NFL_DAILY_WORKER_URL }}
           NFL_DAILY_PUSH_SECRET: ${{ secrets.NFL_DAILY_PUSH_SECRET }}
         run: python3 pipeline/tweets.py --mode sync-handles
 
       - name: Snapshot practice reports
+        id: injuries
+        if: steps.schedule.outcome == 'success'
         continue-on-error: true
         env:
-          NFL_DAILY_WORKER_URL: ${{ secrets.NFL_DAILY_WORKER_URL }}
           NFL_DAILY_PUSH_SECRET: ${{ secrets.NFL_DAILY_PUSH_SECRET }}
         run: python3 pipeline/injuries.py
 
       - name: Build the game-week dossier
+        id: dossier
+        if: steps.schedule.outcome == 'success'
         continue-on-error: true
-        env:
-          NFL_DAILY_WORKER_URL: ${{ secrets.NFL_DAILY_WORKER_URL }}
         run: python3 pipeline/gameweek.py
+
+      # continue-on-error reports a step's conclusion as success no matter how it exited, so a
+      # run's green check says nothing about whether these four worked. Without this the only
+      # symptom of a broken step is data that silently stops changing.
+      - name: Report step outcomes
+        if: always()
+        run: |
+          fail=0
+          for step in "schedule:${{ steps.schedule.outcome }}" \
+                      "handles:${{ steps.handles.outcome }}" \
+                      "injuries:${{ steps.injuries.outcome }}" \
+                      "dossier:${{ steps.dossier.outcome }}"; do
+            name="${step%%:*}"; outcome="${step#*:}"
+            if [ "$outcome" != "success" ]; then
+              echo "::warning title=$name did not succeed::outcome was '${outcome:-skipped}'"
+              echo "- **$name** — \`${outcome:-skipped}\`" >> "$GITHUB_STEP_SUMMARY"
+              fail=1
+            fi
+          done
+          [ "$fail" = 0 ] && echo "All data steps succeeded." >> "$GITHUB_STEP_SUMMARY"
+          exit 0
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
