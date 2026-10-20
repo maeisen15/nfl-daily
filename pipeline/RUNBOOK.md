@@ -23,15 +23,19 @@ Work from the repo root.
 ## 1. Install dependencies
 
 ```bash
-pip install -r pipeline/requirements.txt
+python3 -m pip install -r pipeline/requirements.txt
 ```
+
+`python3 -m pip`, never bare `pip`. In the cloud sandbox they are different interpreters —
+`pip` is 3.13's while `python3` is 3.11 — so `pip install` reports success and then every
+pipeline script dies on `ModuleNotFoundError: No module named 'requests'`.
 
 If feedparser fails on its `sgmllib3k` sub-dependency (legacy sdist, known issue in the cloud
 sandbox), fall back in order until one works:
 
 ```bash
-pip install setuptools wheel && pip install -r pipeline/requirements.txt
-pip install --no-build-isolation sgmllib3k && pip install -r pipeline/requirements.txt
+python3 -m pip install setuptools wheel && python3 -m pip install -r pipeline/requirements.txt
+python3 -m pip install --no-build-isolation sgmllib3k && python3 -m pip install -r pipeline/requirements.txt
 ```
 
 ## 2. Fetch
