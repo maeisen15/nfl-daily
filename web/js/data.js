@@ -6,6 +6,7 @@
  */
 
 const OFFLINE_KEY = "nfl-daily.offline.v1";
+const offlineKey = () => `${OFFLINE_KEY}.${state.vertical?.code || "nfl"}`;
 const OFFLINE_TWEETS = 120;   // enough to fill a few screens without crowding the quota
 const PAGE = 200;
 
@@ -124,19 +125,28 @@ export async function refreshStatic({ force = false } = {}) {
   }
 }
 
-/* This week's opponent beat writer, scoped so it never appears in a feed. Fetched when the
- * Brief is opened rather than baked into gameweek.json, which every app launch loads. */
-export async function fetchOpponentTweets(handle, limit = 30) {
+/* Everything one account posted, newest first.
+ *
+ * By author rather than by scope, deliberately, and it serves two callers for the same reason:
+ * the profile view wants one person regardless of which tab they file under, and this week's
+ * opponent beat writer may also be a rival watched year-round, in which case their scope is
+ * `rivals` and asking by scope would come back empty. No vertical is sent either — a handle is
+ * already more specific than a vertical. */
+export async function fetchByAuthor(handle, { hours = 168, limit = 30 } = {}) {
   const base = (state.config?.tweets_url || "").replace(/\/$/, "");
   if (!base || !handle) return [];
   const url = new URL(`${base}/tweets`);
-  // By author, not by scope: a rival who is also this week's opponent stays scoped `rivals`,
-  // and asking for the opponent scope would come back empty for those weeks.
   url.searchParams.set("handle", handle);
-  url.searchParams.set("hours", "168");
+  url.searchParams.set("hours", String(hours));
   url.searchParams.set("limit", String(limit));
   const body = await fetchJson(url.toString());
   return Array.isArray(body.items) ? body.items : [];
+}
+
+/* This week's opponent beat writer, fetched when the Brief is opened rather than baked into
+ * gameweek.json, which every app launch loads. */
+export async function fetchOpponentTweets(handle, limit = 30) {
+  return fetchByAuthor(handle, { limit });
 }
 
 /* The whole season is 125KB, which is not worth adding to every cold start for a tab that
@@ -169,6 +179,9 @@ export async function fetchTweets({ cursor = null, limit = PAGE, since = null } 
   const base = workerBase();
   if (!base) throw new Error("no tweets_url in config");
   const url = new URL(`${base}/tweets`);
+  // By vertical, not by scope: one vertical's feed spans several scopes and splits them into
+  // tabs in the app, so asking per scope would mean a request per tab.
+  if (state.vertical?.code) url.searchParams.set("vertical", state.vertical.code);
   url.searchParams.set("hours", "168");
   url.searchParams.set("limit", String(limit));
   if (cursor) url.searchParams.set("cursor", cursor);
@@ -200,7 +213,7 @@ export async function loadFirstTweets() {
 
 function cacheOffline(items) {
   try {
-    localStorage.setItem(OFFLINE_KEY, JSON.stringify(items.slice(0, OFFLINE_TWEETS)));
+    localStorage.setItem(offlineKey(), JSON.stringify(items.slice(0, OFFLINE_TWEETS)));
   } catch {
     // Quota, or storage disabled. Offline reading is a nicety; losing it changes nothing else.
   }
@@ -208,7 +221,7 @@ function cacheOffline(items) {
 
 function readOffline() {
   try {
-    const raw = localStorage.getItem(OFFLINE_KEY);
+    const raw = localStorage.getItem(offlineKey());
     const parsed = raw ? JSON.parse(raw) : null;
     return Array.isArray(parsed) ? parsed : [];
   } catch { return []; }

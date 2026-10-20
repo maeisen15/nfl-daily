@@ -14,7 +14,7 @@
  * Everything lands in the same D1 table keyed by tweet id, so the paths can overlap freely;
  * `richness` decides upsert conflicts and the fuller record always wins.
  *
- * Handle -> scope routing lives in D1, synced from sources.yaml by the pipeline, so adding a
+ * Handle -> vertical/scope routing lives in D1, synced from the pipeline's sources files, so adding a
  * handle never requires redeploying this Worker.
  */
 
@@ -170,21 +170,28 @@ async function syncHandles(env, handles) {
     if (!handle) continue;
     stmts.push(
       env.DB.prepare(
-        `INSERT INTO handles (handle, display_name, scope, feed_only, updated_at)
-         VALUES (?, ?, ?, ?, ?)
+        `INSERT INTO handles (handle, display_name, scope, vertical, feed_only, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(handle) DO UPDATE SET
            display_name = excluded.display_name,
            scope        = excluded.scope,
+           vertical     = excluded.vertical,
            feed_only    = excluded.feed_only,
            updated_at   = excluded.updated_at`
-      ).bind(handle, h.display_name || h.handle || "", h.scope || "national", h.feed_only ? 1 : 0, now)
+      ).bind(handle,
+             // Empty is meaningful: it means "use the name the account publishes", which is
+             // right for anyone whose real name isn't worth hard-coding in a config file.
+             typeof h.display_name === "string" ? h.display_name : "",
+             h.scope || "national", h.vertical || "nfl", h.feed_only ? 1 : 0, now)
     );
   }
   if (stmts.length) await env.DB.batch(stmts);
 
-  // The list is authoritative: a handle that has dropped out of sources.yaml — last week's
-  // opponent beat writer, most often — must stop being polled, or the poll query grows by one
-  // handle a week and keeps paying for tweets nobody asked for.
+  // The list is authoritative across every vertical, which is why the pipeline sends all of
+  // them in one call: a handle that has dropped out — last week's opponent beat writer, most
+  // often — must stop being polled, or the poll query grows by one handle a week and keeps
+  // paying for tweets nobody asked for. Sending one vertical at a time here would delete the
+  // other vertical's handles entirely, so pushing a partial list is never safe.
   const keep = handles.map(h => String(h.handle || "").toLowerCase()).filter(Boolean);
   if (keep.length) {
     const CHUNK = 90;
@@ -879,6 +886,7 @@ function absoluteUrl(value, base) {
 
 async function getTweets(request, env, url, origin) {
   const scope = url.searchParams.get("scope") || "";
+  const vertical = url.searchParams.get("vertical") || "";
   const handle = (url.searchParams.get("handle") || "").toLowerCase().replace(/^@/, "");
   const hours = clampInt(url.searchParams.get("hours"), DEFAULT_HOURS, 1, 24 * RETENTION_DAYS);
   const limit = clampInt(url.searchParams.get("limit"), DEFAULT_PAGE, 1, MAX_LIMIT);
@@ -895,6 +903,9 @@ async function getTweets(request, env, url, origin) {
        FROM tweets t JOIN handles h ON h.handle = LOWER(t.author_handle)
       WHERE t.published_at >= ?`;
   const binds = [since];
+  // A feed asks by vertical; its scopes are then filtered in the app, which already has to do
+  // that to split one vertical's feed into tabs.
+  if (vertical) { sql += " AND h.vertical = ?"; binds.push(vertical); }
   if (scope) { sql += " AND h.scope = ?"; binds.push(scope); }
   // By author, for the dossier's beat-writer box: this week's opponent may also be a rival
   // watched year-round, in which case their scope is `rivals` and asking by scope finds
@@ -947,7 +958,8 @@ async function getTweets(request, env, url, origin) {
   const newest = items.length ? items[0].published_at : null;
   return json(
     { schema_version: 2, generated_at: new Date().toISOString(), newest_tweet_at: newest,
-      scope: scope || "all", window_hours: hours, count: items.length, items,
+      scope: scope || "all", vertical: vertical || "all",
+      window_hours: hours, count: items.length, items,
       next_cursor: hasMore && last ? makeCursor(last.published_at, last.id) : null },
     200, env, origin,
     // Short edge cache: keeps a burst of app opens off D1 without making tweets feel stale.

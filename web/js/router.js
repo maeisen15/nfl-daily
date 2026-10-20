@@ -37,6 +37,7 @@ export function parse() {
 
   if (!parts.length) return route("tweets");
   if (parts[0] === "tweet" && parts[1]) return route("tweet", { id: parts[1] });
+  if (parts[0] === "author" && parts[1]) return route("author", { handle: parts[1] });
   if (VIEWS.includes(parts[0])) return route(parts[0]);
   return route("tweets");
 }
@@ -63,7 +64,7 @@ function qualify(hash) {
 export function tabFor(route) {
   // Settings is reached from the masthead, not the bottom bar, so it highlights nothing there.
   if (route.name === "settings") return null;
-  if (route.name === "tweet" || route.name === "liked") return "tweets";
+  if (["tweet", "liked", "author"].includes(route.name)) return "tweets";
   return route.name;
 }
 
@@ -72,6 +73,7 @@ export function key(route) {
   // different places to be scrolled in.
   const v = route.vertical || active || "-";
   if (route.name === "tweet") return `${v}:tweet:${route.id}`;
+  if (route.name === "author") return `${v}:author:${route.handle}`;
   if (route.name === "schedule") {
     // Week paging deliberately shares one key so the list does not jump; the standings and a
     // team's season are separate places and remember their own positions.

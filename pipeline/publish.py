@@ -632,9 +632,7 @@ def main():
                 "default_scope": "elections",
                 # No schedule: there is no season to page through.
                 "tabs": ["tweets", "articles", "brief"],
-                # The Worker holds one undifferentiated pool of football tweets. Until it can
-                # separate them by vertical, this one has no live feed of its own to ask for.
-                "live_tweets": False,
+                "live_tweets": True,
                 "scopes": [{"code": "elections", "label": "Elections",
                             "short": "Elections", "role": "primary"}],
             },

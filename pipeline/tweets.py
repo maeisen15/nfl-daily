@@ -42,6 +42,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SOURCES_FILE = Path(os.environ.get("NFL_DAILY_SOURCES", REPO_ROOT / "config" / "sources.yaml"))
+POLITICS_FILE = REPO_ROOT / "config" / "sources.politics.yaml"
 SECRETS_FILE = Path(os.path.expanduser(os.environ.get("NFL_DAILY_SECRETS", "~/.nfl-digest/secrets.env")))
 
 from worker import worker_base  # noqa: E402
@@ -143,21 +144,28 @@ def main() -> int:
 # ---------- config ----------
 
 def load_handles() -> list[dict[str, Any]]:
-    """Flatten every enabled twitter handle in sources.yaml into {handle, display_name, scope,
-    feed_only}. `scope` matches the app's scope codes so the Worker can route without knowing
-    anything about the YAML's structure."""
+    """Flatten every enabled twitter handle in every vertical's sources file into
+    {handle, display_name, scope, vertical, feed_only}. `scope` and `vertical` match the app's
+    own codes so the Worker can route without knowing anything about the YAML's structure.
+
+    One list covers every vertical, and it is authoritative: the Worker drops any handle it
+    doesn't find here, so a partial list would silently stop polling the vertical it left out.
+    """
     with SOURCES_FILE.open() as f:
         cfg = yaml.safe_load(f)
 
     out: list[dict[str, Any]] = []
 
-    def add(tw: dict[str, Any], scope: str) -> None:
+    def add(tw: dict[str, Any], scope: str, vertical: str = "nfl") -> None:
         if not tw.get("enabled", True):
             return
         out.append({
             "handle": tw["handle"],
-            "display_name": tw.get("name") or tw["handle"],
+            # Empty rather than the handle: an absent name means "use the account's own
+            # Twitter name", which beats stamping @some_handle across every one of its posts.
+            "display_name": tw.get("name") or "",
             "scope": scope,
+            "vertical": vertical,
             "feed_only": bool(tw.get("feed_only", False)),
         })
 
@@ -174,6 +182,15 @@ def load_handles() -> list[dict[str, Any]]:
     for rival in tc.get("rivals") or []:
         for tw in rival.get("twitter_handles") or []:
             add(tw, "rivals")
+
+    # Other verticals are flat lists of handles — no teams, no rivals, no season.
+    for path, scope, vertical in ((POLITICS_FILE, "elections", "politics"),):
+        if not path.exists():
+            continue
+        with path.open() as f:
+            extra = yaml.safe_load(f) or {}
+        for tw in extra.get("twitter_handles") or []:
+            add(tw, scope, vertical)
 
     opponent = upcoming_opponent(primary_code)
     writer = (cfg.get("team_beat_writers") or {}).get(opponent) if opponent else None

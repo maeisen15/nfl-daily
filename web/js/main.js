@@ -13,6 +13,7 @@ import { renderDetail, hydrateDetail } from "./views/detail.js";
 import { renderArticles } from "./views/articles.js";
 import { renderBrief } from "./views/brief.js";
 import { renderLiked, hydrateLiked } from "./views/liked.js";
+import { renderAuthor, hydrateAuthor } from "./views/author.js";
 import { renderSettings } from "./views/settings.js";
 import { renderSchedule } from "./views/schedule.js";
 import { fetchTweets } from "./data.js";
@@ -99,6 +100,7 @@ function render(route = parse()) {
   let view;
   switch (route.name) {
     case "tweet":    view = renderDetail(route.id, back); break;
+    case "author":   view = renderAuthor(route.handle); break;
     case "articles": view = renderArticles(store.scope); break;
     case "schedule": view = renderSchedule(route.params); break;
     case "brief":    view = renderBrief(store.scope); break;
@@ -111,13 +113,16 @@ function render(route = parse()) {
 
   if (route.name === "tweets") { hydrateFeed(main); watchSentinel(main, () => render(parse())); }
   if (route.name === "tweet") hydrateDetail(main);
+  if (route.name === "author") hydrateAuthor(main, route.handle);
   if (route.name === "liked") hydrateLiked(main);
 
   if (sameRoute) {
     window.scrollTo(0, heldScroll);
   } else {
     // A detail view opens at the top; a list returns to where it was left.
-    window.scrollTo(0, route.name === "tweet" ? 0 : (store.scrollPositions[currentKey] || 0));
+    // A detail view or a profile opens at the top; a list returns to where it was left.
+    const opensAtTop = route.name === "tweet" || route.name === "author";
+    window.scrollTo(0, opensAtTop ? 0 : (store.scrollPositions[currentKey] || 0));
     // The jump is not a scroll gesture, so it must not be read as one.
     resetChrome();
   }

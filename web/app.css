@@ -561,7 +561,51 @@ main {
 .detail-head { display: flex; align-items: center; gap: 12px; }
 .detail-head .avatar { width: 44px; height: 44px; }
 .detail-names { min-width: 0; }
-.detail-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail-name { font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---------- one account's posts ---------- */
+
+.author-link { display: block; }
+a.tweet-name { color: var(--text); }
+a.tweet-name:active, .author-link:active { opacity: .6; }
+
+.author-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px var(--pad-x);
+  border-bottom: 1px solid var(--line);
+}
+.author-avatar { width: 56px; height: 56px; border-radius: 999px; flex-shrink: 0; }
+.author-avatar-fallback {
+  display: grid;
+  place-items: center;
+  background: var(--bg-sunken);
+  color: var(--muted);
+  font-size: 22px;
+  font-weight: 700;
+}
+.author-id { min-width: 0; flex: 1; }
+.author-name {
+  font-size: 19px; font-weight: 800; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.author-handle { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.author-out {
+  flex-shrink: 0;
+  padding: 7px 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.author-count {
+  padding: 11px var(--pad-x);
+  color: var(--muted);
+  font-size: 13px;
+  border-bottom: 1px solid var(--line);
+}
+.empty-note { margin-top: 6px; font-size: 14px; }
 .detail-handle { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .detail-text {

@@ -8,7 +8,7 @@ import { el, icon, frag, safeUrl } from "../lib/dom.js";
 import * as ICON from "../lib/icons.js";
 import { shortTime, fullTime, compactCount } from "../lib/time.js";
 import * as likes from "../lib/likes.js";
-import { go } from "../router.js";
+import { go, activeVertical } from "../router.js";
 import { openLightbox } from "./lightbox.js";
 
 /* A retweet displays as the post being retweeted — that is what Twitter shows, and it is the
@@ -50,7 +50,7 @@ export function tweetRow(item, opts = {}) {
       icon(ICON.RETWEET, {}), `${item.author_name || item.author_handle} reposted`));
   }
 
-  const avatarCol = el("div", { class: "avatar-col" }, avatar(subject));
+  const avatarCol = el("div", { class: "avatar-col" }, authorLink(subject, avatar(subject)));
   if (connector) avatarCol.appendChild(el("div", { class: "thread-line" }));
   row.appendChild(avatarCol);
 
@@ -83,9 +83,26 @@ function initials(subject) {
   return el("div", { class: "avatar avatar-fallback", "aria-hidden": "true", text: name.charAt(0).toUpperCase() });
 }
 
+/* The byline opens that account's posts. An anchor rather than a click handler on purpose: the
+ * row's own handler ignores anything inside a link, so this costs nothing to opt out of, and a
+ * real href can be long-pressed and opened the way a link is expected to behave. */
+function authorHref(handle) {
+  return handle ? `#/${activeVertical()}/author/${encodeURIComponent(handle)}` : null;
+}
+
+function authorLink(subject, child) {
+  const href = authorHref(subject.author_handle);
+  if (!href) return child;
+  return el("a", { class: "author-link", href,
+                   "aria-label": `Posts by @${subject.author_handle}` }, child);
+}
+
 function nameRow(subject) {
+  const href = authorHref(subject.author_handle);
+  const name = displayName(subject.author_name || subject.author_handle);
   return el("div", { class: "tweet-head" },
-    el("span", { class: "tweet-name", text: displayName(subject.author_name || subject.author_handle) }),
+    href ? el("a", { class: "tweet-name", href }, name)
+         : el("span", { class: "tweet-name", text: name }),
     subject.author_handle ? el("span", { class: "tweet-handle", text: `@${subject.author_handle}` }) : null,
     el("span", { class: "tweet-dot", text: "·" }),
     el("time", { class: "tweet-time", datetime: subject.published_at || "", text: shortTime(subject.published_at) }),

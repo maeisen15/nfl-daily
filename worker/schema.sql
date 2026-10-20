@@ -1,4 +1,4 @@
--- NFL Daily tweet store.
+-- StreamWire tweet store.
 --
 -- Two writers land here: the twitterapi.io webhook (fast, possibly thin payloads) and the
 -- pipeline's reconciliation sweep (slower, always full tweet objects). `richness` lets the
@@ -56,11 +56,14 @@ CREATE TABLE IF NOT EXISTS link_cards (
 -- the single source of truth and adding a handle never needs a Worker redeploy.
 CREATE TABLE IF NOT EXISTS handles (
   handle       TEXT PRIMARY KEY,         -- lowercased
-  display_name TEXT,
-  scope        TEXT NOT NULL,            -- BAL | national | PIT | ...
+  display_name TEXT,                     -- '' means "use the account's own Twitter name"
+  scope        TEXT NOT NULL,            -- BAL | national | rivals | elections | ...
+  vertical     TEXT NOT NULL DEFAULT 'nfl',  -- which feed this handle belongs to
   feed_only    INTEGER NOT NULL DEFAULT 0,
   updated_at   TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_handles_vertical ON handles (vertical, scope);
 
 -- Small key/value scratch for the poller. Its purpose is diagnostic: a poll that returns
 -- nothing looks identical to a poll that silently broke, so every run records what it asked

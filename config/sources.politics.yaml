@@ -1,0 +1,82 @@
+# StreamWire — Politics vertical.
+#
+# Read by pipeline/tweets.py alongside config/sources.yaml. Everything here lands in the
+# `elections` scope of the `politics` vertical; football's file is untouched by it.
+#
+# Per-handle keys:
+#   handle:     without the @. Case is preserved for display but matched lowercase.
+#   name:       OPTIONAL display name. Leave it out and the account's own Twitter name is
+#               used, which is usually what you want — set it only to override.
+#   enabled:    false parks a handle without deleting it. The Worker drops handles that leave
+#               this file, so commenting one out stops it being polled on the next sync.
+#   feed_only:  true keeps a handle out of digests while still showing it in the feed.
+#
+# Adding or removing a handle takes effect on the next:
+#   python3 pipeline/tweets.py --mode sync-handles
+
+twitter_handles:
+  # ---- Modelers and forecasters ----
+  - handle: "NateSilver538"
+    name: "Nate Silver"
+  - handle: "davidshor"
+    name: "David Shor"
+  - handle: "DecisionDeskHQ"
+    name: "Decision Desk HQ"
+  - handle: "CNalysis"
+    name: "CNalysis"
+  - handle: "SplitTicket_"
+    name: "Split Ticket"
+  - handle: "lxeagle17"
+    name: "Lakshya Jain"
+  - handle: "ChazNuttyCombe"
+    name: "Chaz Nuttycombe"
+
+  # ---- Analysts and handicappers ----
+  - handle: "Redistrict"
+    name: "Dave Wasserman"
+  - handle: "Nate_Cohn"
+    name: "Nate Cohn"
+  - handle: "ForecasterEnten"
+    name: "Harry Enten"
+  - handle: "SeanTrende"
+    name: "Sean Trende"
+  - handle: "baseballot"
+    name: "Nathaniel Rakich"
+  - handle: "geoffreyvs"
+    name: "Geoffrey Skelley"
+  - handle: "kkondik"
+    name: "Kyle Kondik"
+  - handle: "JMilesColeman"
+    name: "J. Miles Coleman"
+  - handle: "amyewalter"
+    name: "Amy Walter"
+  - handle: "JacobRubashkin"
+    name: "Jacob Rubashkin"
+  - handle: "ryanmatsumoto1"
+    name: "Ryan Matsumoto"
+
+  # ---- Outlets ----
+  - handle: "CookPolitical"
+    name: "Cook Political Report"
+  - handle: "Elections_Daily"
+    name: "Elections Daily"
+  - handle: "270toWin"
+    name: "270toWin"
+
+  # ---- On the ground: returns, early vote, state-level ----
+  - handle: "RalstonReports"
+    name: "Jon Ralston"
+  - handle: "Garret_Archer"
+    name: "Garrett Archer"
+
+  # ---- Independent analysts ----
+  # Names deliberately omitted: these accounts' own Twitter names are the right label, and
+  # guessing at one would put the wrong name on every post.
+  - handle: "ECaliberSeven"
+  - handle: "maxtmcc"
+  - handle: "_fat_ugly_rat_"
+  - handle: "jhkersting"
+  - handle: "BruneElections"
+  - handle: "DrewSav"
+  - handle: "JosephSzymanski"
+  - handle: "Blake_Allen13"
