@@ -100,7 +100,7 @@ function render(route = parse()) {
   let view;
   switch (route.name) {
     case "tweet":    view = renderDetail(route.id, back); break;
-    case "author":   view = renderAuthor(route.handle); break;
+    case "author":   view = renderAuthor(route.handle, back); break;
     case "articles": view = renderArticles(store.scope); break;
     case "schedule": view = renderSchedule(route.params); break;
     case "brief":    view = renderBrief(store.scope); break;
@@ -189,7 +189,9 @@ function normalizeHash() {
   const raw = (location.hash || "").replace(/^#\/?/, "");
   const first = raw.split(/[/?]/)[0];
   if (data.verticals().some(v => v.code === first)) return;
-  history.replaceState(null, "", `#/${activeVertical()}/${raw}`);
+  // Name the view too. "#/nfl/" renders the feed perfectly well, but it is the entry the back
+  // button lands on, and a bare vertical reads like a half-written URL when you get there.
+  history.replaceState(null, "", `#/${activeVertical()}/${raw || "tweets"}`);
 }
 
 
@@ -259,7 +261,10 @@ function changeScope(code) {
   store.scrollPositions = {};
   renderScopes(changeScope);
   const route = parse();
-  if (route.name === "tweet") go("/tweets");
+  // A post and a person both belong to themselves, not to the scope you happened to be in when
+  // you opened them. Staying put would leave you reading a Ravens beat writer under the NFL
+  // tab with no way back to a feed except switching scope again.
+  if (route.name === "tweet" || route.name === "author") go("/tweets");
   // A team's season belongs to the team, not the scope you were in when you opened it, so
   // changing scope leaves it rather than showing the Ravens under a Rivals heading.
   else if (route.name === "schedule" && route.params.get("team")) go("/schedule");

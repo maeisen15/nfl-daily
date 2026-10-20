@@ -6,14 +6,23 @@
  * there is something, it just was never collected here.
  */
 
-import { el, safeUrl } from "../lib/dom.js";
+import { el, icon, safeUrl } from "../lib/dom.js";
+import * as ICON from "../lib/icons.js";
 import { fetchByAuthor } from "../data.js";
 import { tweetRow, hydrateClamps, displayName } from "./tweet.js";
 
-export function renderAuthor(handle) {
-  const wrap = el("div", { class: "author-view", dataset: { handle } });
-  wrap.appendChild(el("div", { class: "empty", text: "Loading posts…" }));
-  return wrap;
+export function renderAuthor(handle, onBack) {
+  // The bar sits outside .author-view because hydrate replaces that element's contents once the
+  // posts land, and a back button that vanishes the moment the page finishes loading is worse
+  // than no back button at all.
+  return el("div", {},
+    el("div", { class: "detail-bar" },
+      el("button", { class: "icon-btn", "aria-label": "Back", onclick: onBack }, icon(ICON.BACK, {})),
+      el("span", { text: `@${handle}` }),
+    ),
+    el("div", { class: "author-view", dataset: { handle } },
+      el("div", { class: "empty", text: "Loading posts…" })),
+  );
 }
 
 export async function hydrateAuthor(container, handle) {

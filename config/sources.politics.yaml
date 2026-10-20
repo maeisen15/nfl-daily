@@ -54,6 +54,10 @@ twitter_handles:
     name: "Jacob Rubashkin"
   - handle: "ryanmatsumoto1"
     name: "Ryan Matsumoto"
+  - handle: "gelliottmorris"
+    name: "G. Elliott Morris"
+  - handle: "nathanlgonzales"
+    name: "Nathan Gonzales"
 
   # ---- Outlets ----
   - handle: "CookPolitical"
@@ -62,12 +66,28 @@ twitter_handles:
     name: "Elections Daily"
   - handle: "270toWin"
     name: "270toWin"
+  - handle: "InsideElections"
+    name: "Inside Elections"
+
+  # ---- Republican pollsters ----
+  # Here for the methodology, not the rooting interest: both write seriously about response
+  # bias and polling error. Drop them if the feed starts reading like a side rather than a read.
+  - handle: "PatrickRuffini"
+    name: "Patrick Ruffini"
+  - handle: "KSoltisAnderson"
+    name: "Kristen Soltis Anderson"
 
   # ---- On the ground: returns, early vote, state-level ----
+  - handle: "ElectProject"
+    name: "Michael McDonald"
   - handle: "RalstonReports"
     name: "Jon Ralston"
   - handle: "Garret_Archer"
     name: "Garrett Archer"
+  - handle: "NilesGApol"
+    name: "Niles Francis"
+  - handle: "SteveKornacki"
+    name: "Steve Kornacki"
 
   # ---- Independent analysts ----
   # Names deliberately omitted: these accounts' own Twitter names are the right label, and
