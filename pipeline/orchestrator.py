@@ -309,8 +309,10 @@ def _load_tweets_from_worker(hours: int) -> tuple[dict[str, Any], list[dict[str,
 
     feed_only = {h["handle"].lower() for h in _yaml_handles() if h["feed_only"]}
     primary_code = _primary_code()
+    rival_codes = _rival_codes()
 
     synthesis: list[dict[str, Any]] = []
+    dropped_unknown_scope = 0
     for it in items:
         scope = (it.get("scopes") or ["national"])[0]
         entry = {
@@ -336,8 +338,14 @@ def _load_tweets_from_worker(hours: int) -> tuple[dict[str, Any], list[dict[str,
             # This week's opposing beat writer. Watched so the game-week dossier can show their
             # week, and deliberately in no tab — the rivals bucket would put them in one.
             continue
-        else:
+        elif scope in rival_codes:
             feeds["rivals"].setdefault(scope, []).append(entry)
+        else:
+            # The Worker's D1 store is shared with other verticals (e.g. config/sources.
+            # politics.yaml's "elections" scope) that poll through the same twitterapi.io
+            # account. Anything not in this app's own team_coverage doesn't belong here.
+            dropped_unknown_scope += 1
+            continue
 
         if entry["author_handle"].lower() in feed_only or entry["is_retweet"]:
             continue
@@ -350,6 +358,13 @@ def _load_tweets_from_worker(hours: int) -> tuple[dict[str, Any], list[dict[str,
             "author": entry["author_handle"],
             "scope": scope,
         })
+
+    if dropped_unknown_scope:
+        print(
+            f"NOTE: dropped {dropped_unknown_scope} tweet(s) with a scope outside this app's "
+            "team_coverage (another vertical sharing the Worker, e.g. 'elections')",
+            file=sys.stderr,
+        )
 
     return feeds, synthesis, None
 
@@ -364,6 +379,13 @@ def _primary_code() -> str:
     with SOURCES_FILE.open() as f:
         cfg = yaml.safe_load(f)
     return ((cfg.get("team_coverage") or {}).get("primary") or {}).get("team_code", "BAL")
+
+
+def _rival_codes() -> set[str]:
+    with SOURCES_FILE.open() as f:
+        cfg = yaml.safe_load(f)
+    rivals = (cfg.get("team_coverage") or {}).get("rivals") or []
+    return {r["team_code"] for r in rivals if r.get("team_code")}
 
 
 def _team_coverage_meta(config: dict[str, Any]) -> dict[str, Any]:

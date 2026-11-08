@@ -97,8 +97,11 @@ structured_data:
     type: "espn_injuries"
     # Single league-wide endpoint returning expanded data in one call.
     # Returns expanded data in one call — simpler than the per-team-id loop in the original plan.
+    # Teams come back in a fixed (non-recency) order, each with ~25 records, 32 teams wide —
+    # a cap below ~800 silently drops whichever teams sort last (was 200: everything from
+    # Dallas onward, including rivals KC and PIT, every single run).
     link_destination: "https://www.espn.com/nfl/injuries"
-    max_items: 200
+    max_items: 1000
     enabled: true
 
   - id: espn_transactions
