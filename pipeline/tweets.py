@@ -111,16 +111,21 @@ def main() -> int:
     print(f"search watermark: {since.isoformat()} "
           f"({(datetime.now(timezone.utc) - since).total_seconds() / 3600:.1f}h back)",
           file=sys.stderr)
+    # `--only` narrows what is searched, never what is pushed. The push carries the handle
+    # list and the Worker treats it as authoritative, deleting any handle it doesn't find — so
+    # pushing the narrowed list would stop every other account being polled until the next
+    # full sync.
+    sweep = handles
     if args.only:
         wanted = {h.strip().lower().lstrip("@") for h in args.only.split(",") if h.strip()}
-        handles = [h for h in handles if h["handle"].lower() in wanted]
-        missing = wanted - {h["handle"].lower() for h in handles}
+        sweep = [h for h in handles if h["handle"].lower() in wanted]
+        missing = wanted - {h["handle"].lower() for h in sweep}
         if missing:
-            print(f"ERROR: not in sources.yaml: {', '.join(sorted(missing))}", file=sys.stderr)
+            print(f"ERROR: not in the sources files: {', '.join(sorted(missing))}", file=sys.stderr)
             return 1
-        print(f"backfilling only: {', '.join(h['handle'] for h in handles)}", file=sys.stderr)
+        print(f"backfilling only: {', '.join(h['handle'] for h in sweep)}", file=sys.stderr)
 
-    tweets, requests_made = sweep_search(api_key, handles, since)
+    tweets, requests_made = sweep_search(api_key, sweep, since)
 
     unique = dedupe(tweets)
     elapsed = time.monotonic() - started
