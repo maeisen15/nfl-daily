@@ -21,6 +21,10 @@
 #   icon:       false for a newsletter with no logo of its own, so the list shows its initial
 #               instead of the generic Substack mark several of them would share.
 # After adding a source: python3 scripts/fetch_source_icons.py
+#
+# Feeds on a *.substack.com address answer 403 to the hourly run's servers, though they work
+# from a laptop. Use the newsletter's own domain, or a mirror on another host, as Import AI and
+# Zvi do below. A newsletter with neither can't be an article source here.
 
 # Newsletters publish weekly, so the Articles tab looks back further than football's does.
 article_window_days: 14
@@ -116,8 +120,8 @@ news_sources:
     rank: 40
   - id: ai_import_ai
     name: "Import AI"
-    url: "https://importai.substack.com/"
-    rss_url: "https://importai.substack.com/feed"
+    url: "https://jack-clark.net/"
+    rss_url: "https://jack-clark.net/feed/"
     fetch: "rss"
     rank: 50
   - id: ai_hyperdimensional
@@ -140,23 +144,10 @@ news_sources:
     rank: 80
     # Four or five posts a week, about half of them on AI.
     max_items: 5
-  - id: ai_rising_tide
-    name: "Rising Tide (Helen Toner)"
-    url: "https://helentoner.substack.com/"
-    rss_url: "https://helentoner.substack.com/feed"
-    fetch: "rss"
-    rank: 90
-  - id: ai_miles_brundage
-    name: "Miles Brundage"
-    url: "https://milesbrundage.substack.com/"
-    rss_url: "https://milesbrundage.substack.com/feed"
-    fetch: "rss"
-    icon: false
-    rank: 100
   - id: ai_zvi
     name: "Don't Worry About the Vase (Zvi)"
-    url: "https://thezvi.substack.com/"
-    rss_url: "https://thezvi.substack.com/feed"
+    url: "https://thezvi.wordpress.com/"
+    rss_url: "https://thezvi.wordpress.com/feed/"
     fetch: "rss"
     icon: false
     rank: 110
