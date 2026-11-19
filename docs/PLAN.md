@@ -307,6 +307,13 @@ that table, so the YAML alone does nothing. Verify first: a misspelled handle is
 the query, returns nothing forever, and is reported by nothing. `--only` backfills just the new
 one, for a fraction of a full sweep.
 
+**A vertical:** add an entry to `FLAT` in `pipeline/verticals.py` and write its
+`config/sources.<code>.yaml` with `twitter_handles` and `news_sources`. The switcher, the tab
+bar, the handle sync, the article fetch and the icon fetch all read that one list. A vertical
+opens on its first tab, and one with no enabled handles has no Tweets tab until it gets one.
+Its articles come from `pipeline/vertical_articles.py`, which keeps two weeks by default
+because newsletters publish weekly. A newsletter with no logo of its own takes `icon: false`.
+
 **A rival team:** add it under `team_coverage.rivals` with a beat writer, and its team code
 reaches the schedule tab through `config.json` without a code change.
 

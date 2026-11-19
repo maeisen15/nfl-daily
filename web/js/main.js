@@ -4,7 +4,7 @@ import { el, icon } from "./lib/dom.js";
 import * as ICON from "./lib/icons.js";
 import { store, set, mergeTweets } from "./store.js";
 import { parse, go, onRoute, key as routeKey,
-         setVerticals, setActiveVertical, activeVertical } from "./router.js";
+         setVerticals, setActiveVertical, activeVertical, homeView } from "./router.js";
 import * as data from "./data.js";
 import { initTheme, renderVerticals, renderScopes, renderTabs, renderStatus,
          scopeCodes } from "./views/chrome.js";
@@ -50,7 +50,9 @@ async function boot() {
   const hashFirst = (location.hash || "").replace(/^#\/?/, "").split(/[/?]/)[0];
   const wanted = [hashFirst, params.get("vertical"), read(VERTICAL_KEY),
                   data.state.config.default_vertical].find(c => codes.includes(c));
-  setVerticals(codes, wanted || codes[0]);
+  const homes = Object.fromEntries(
+    data.verticals().map(v => [v.code, (v.tabs || [])[0] || "tweets"]));
+  setVerticals(codes, wanted || codes[0], homes);
   await data.selectVertical(activeVertical());
   store.scope = pickScope(data.state.vertical, params.get("scope"));
 
@@ -176,7 +178,7 @@ function back() {
   // Back through history keeps the feed's scroll restoration working; the fallback is for a
   // detail view opened directly from a shared or reloaded URL.
   if (history.length > 1) history.back();
-  else go("/tweets");
+  else go(`/${homeView()}`);
 }
 
 /* ---------- verticals ---------- */
@@ -191,7 +193,7 @@ function normalizeHash() {
   if (data.verticals().some(v => v.code === first)) return;
   // Name the view too. "#/nfl/" renders the feed perfectly well, but it is the entry the back
   // button lands on, and a bare vertical reads like a half-written URL when you get there.
-  history.replaceState(null, "", `#/${activeVertical()}/${raw || "tweets"}`);
+  history.replaceState(null, "", `#/${activeVertical()}/${raw || homeView()}`);
 }
 
 
@@ -246,7 +248,7 @@ async function changeVertical(code) {
   set({ tweets: [], pending: [], cursor: null, exhausted: false, newestSeen: null });
   renderVerticals(changeVertical);
   renderScopes(changeScope);
-  go(`/${code}/tweets`);
+  go(`/${code}/${homeView(code)}`);
   render(parse());
   await loadTweets();
   render(parse());

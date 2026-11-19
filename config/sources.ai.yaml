@@ -1,0 +1,164 @@
+# StreamWire — AI vertical.
+#
+# Read through pipeline/verticals.py. Everything here lands in the `ai` scope of the `ai`
+# vertical. The mix is deliberate: reporters, policy insiders, forecasters, skeptics, and
+# China and economics specialists, so the feed reads as an argument rather than one camp.
+#
+# Per-handle keys:
+#   handle:     without the @. Case is preserved for display but matched lowercase.
+#   name:       OPTIONAL display name. Leave it out and the account's own Twitter name is used.
+#   enabled:    false parks a handle without deleting it. The Worker drops handles that leave
+#               the synced list, so a parked handle is not polled and costs nothing.
+#   feed_only:  true keeps a handle out of digests while still showing it in the feed.
+#
+# Adding or un-parking a handle takes effect on the next sync, and every enabled handle is
+# polled, which is billed. Verify before syncing — a misspelled handle returns nothing forever:
+#   python3 scripts/verify_handles.py --only <handle>,<handle>
+#   python3 pipeline/tweets.py --mode sync-handles
+#
+# Per-source keys are the same as news_sources in config/sources.yaml, plus:
+#   max_items:  most articles kept from this source at once (default 8).
+#   icon:       false for a newsletter with no logo of its own, so the list shows its initial
+#               instead of the generic Substack mark several of them would share.
+# After adding a source: python3 scripts/fetch_source_icons.py
+
+# Newsletters publish weekly, so the Articles tab looks back further than football's does.
+article_window_days: 14
+
+twitter_handles:
+  # ---- Reporters ----
+  - handle: "ShakeelHashim"
+    name: "Shakeel Hashim"
+    enabled: false
+  - handle: "KelseyTuoc"
+    name: "Kelsey Piper"
+    enabled: false
+  - handle: "kevinroose"
+    name: "Kevin Roose"
+    enabled: false
+
+  # ---- Policy insiders ----
+  - handle: "deanwball"
+    name: "Dean Ball"
+    enabled: false
+  - handle: "hlntnr"
+    name: "Helen Toner"
+    enabled: false
+  - handle: "Miles_Brundage"
+    name: "Miles Brundage"
+    enabled: false
+  - handle: "jackclarkSF"
+    name: "Jack Clark"
+    enabled: false
+
+  # ---- Analysts ----
+  - handle: "TheZvi"
+    name: "Zvi Mowshowitz"
+    enabled: false
+  - handle: "binarybits"
+    name: "Timothy B. Lee"
+    enabled: false
+  - handle: "dwarkesh_sp"
+    name: "Dwarkesh Patel"
+    enabled: false
+
+  # ---- Forecasters and measurement ----
+  - handle: "DKokotajlo"
+    name: "Daniel Kokotajlo"
+    enabled: false
+  - handle: "METR_Evals"
+    name: "METR"
+    enabled: false
+  - handle: "EpochAIResearch"
+    name: "Epoch AI"
+    enabled: false
+
+  # ---- Skeptics ----
+  - handle: "random_walker"
+    name: "Arvind Narayanan"
+    enabled: false
+  - handle: "GaryMarcus"
+    name: "Gary Marcus"
+    enabled: false
+
+  # ---- China and economics ----
+  - handle: "jordanschnyc"
+    name: "Jordan Schneider"
+    enabled: false
+  - handle: "Noahpinion"
+    name: "Noah Smith"
+    enabled: false
+
+news_sources:
+  - id: ai_transformer
+    name: "Transformer"
+    url: "https://www.transformernews.ai/"
+    rss_url: "https://www.transformernews.ai/feed"
+    fetch: "rss"
+    rank: 10
+  - id: ai_understanding_ai
+    name: "Understanding AI"
+    url: "https://www.understandingai.org/"
+    rss_url: "https://www.understandingai.org/feed"
+    fetch: "rss"
+    rank: 20
+  - id: ai_normal_tech
+    name: "Normal Tech"
+    url: "https://www.normaltech.ai/"
+    rss_url: "https://www.normaltech.ai/feed"
+    fetch: "rss"
+    rank: 30
+  - id: ai_futures_project
+    name: "AI Futures Project"
+    url: "https://blog.aifutures.org/"
+    rss_url: "https://blog.aifutures.org/feed"
+    fetch: "rss"
+    rank: 40
+  - id: ai_import_ai
+    name: "Import AI"
+    url: "https://importai.substack.com/"
+    rss_url: "https://importai.substack.com/feed"
+    fetch: "rss"
+    rank: 50
+  - id: ai_hyperdimensional
+    name: "Hyperdimensional"
+    url: "https://www.hyperdimensional.co/"
+    rss_url: "https://www.hyperdimensional.co/feed"
+    fetch: "rss"
+    rank: 60
+  - id: ai_metr
+    name: "METR"
+    url: "https://metr.org/blog/"
+    rss_url: "https://metr.org/feed.xml"
+    fetch: "rss"
+    rank: 70
+  - id: ai_chinatalk
+    name: "ChinaTalk"
+    url: "https://www.chinatalk.media/"
+    rss_url: "https://www.chinatalk.media/feed"
+    fetch: "rss"
+    rank: 80
+    # Four or five posts a week, about half of them on AI.
+    max_items: 5
+  - id: ai_rising_tide
+    name: "Rising Tide (Helen Toner)"
+    url: "https://helentoner.substack.com/"
+    rss_url: "https://helentoner.substack.com/feed"
+    fetch: "rss"
+    rank: 90
+  - id: ai_miles_brundage
+    name: "Miles Brundage"
+    url: "https://milesbrundage.substack.com/"
+    rss_url: "https://milesbrundage.substack.com/feed"
+    fetch: "rss"
+    icon: false
+    rank: 100
+  - id: ai_zvi
+    name: "Don't Worry About the Vase (Zvi)"
+    url: "https://thezvi.substack.com/"
+    rss_url: "https://thezvi.substack.com/feed"
+    fetch: "rss"
+    icon: false
+    rank: 110
+    # Near-daily and very long; a few is enough to know what the week's argument was.
+    max_items: 4

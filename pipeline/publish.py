@@ -30,6 +30,7 @@ except ImportError:
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(REPO_ROOT, "pipeline"))
 
+import verticals  # noqa: E402
 from worker import worker_base  # noqa: E402
 
 _RUNTIME = os.path.expanduser(os.environ.get("NFL_DAILY_RUNTIME", os.path.join(REPO_ROOT, "runtime")))
@@ -625,17 +626,8 @@ def main():
                 "live_tweets": True,
                 "scopes": nfl_scopes,
             },
-            {
-                "code": "politics",
-                "label": "Politics",
-                "data_dir": "data/politics",
-                "default_scope": "elections",
-                # No schedule: there is no season to page through.
-                "tabs": ["tweets", "articles", "brief"],
-                "live_tweets": True,
-                "scopes": [{"code": "elections", "label": "Elections",
-                            "short": "Elections", "role": "primary"}],
-            },
+            # Every other vertical is a flat list of sources; see verticals.py.
+            *verticals.config_entries(),
         ],
     })
     write("feed.json", {

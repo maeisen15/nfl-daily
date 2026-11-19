@@ -7,3 +7,5 @@ runtime/
 web/debug-frame.html
 node_modules/
 screenshots/
+# Rebuilt by every run and never committed; see pipeline/vertical_articles.py.
+web/data/*/feed.json

@@ -42,9 +42,9 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SOURCES_FILE = Path(os.environ.get("NFL_DAILY_SOURCES", REPO_ROOT / "config" / "sources.yaml"))
-POLITICS_FILE = REPO_ROOT / "config" / "sources.politics.yaml"
 SECRETS_FILE = Path(os.path.expanduser(os.environ.get("NFL_DAILY_SECRETS", "~/.nfl-digest/secrets.env")))
 
+import verticals  # noqa: E402
 from worker import worker_base  # noqa: E402
 
 API_BASE = "https://api.twitterapi.io"
@@ -184,13 +184,9 @@ def load_handles() -> list[dict[str, Any]]:
             add(tw, "rivals")
 
     # Other verticals are flat lists of handles — no teams, no rivals, no season.
-    for path, scope, vertical in ((POLITICS_FILE, "elections", "politics"),):
-        if not path.exists():
-            continue
-        with path.open() as f:
-            extra = yaml.safe_load(f) or {}
-        for tw in extra.get("twitter_handles") or []:
-            add(tw, scope, vertical)
+    for v in verticals.FLAT:
+        for tw in verticals.handles(v):
+            add(tw, v["scope"]["code"], v["code"])
 
     opponent = upcoming_opponent(primary_code)
     writer = (cfg.get("team_beat_writers") or {}).get(opponent) if opponent else None

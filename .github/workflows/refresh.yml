@@ -62,6 +62,13 @@ jobs:
       - name: Publish app data
         run: python3 pipeline/publish.py
 
+      # The other verticals' newsletters. Separate from the football fetch and never blocks the
+      # deploy: a failure here empties one vertical's Articles tab, not the app.
+      - name: Fetch vertical articles
+        id: verticals
+        continue-on-error: true
+        run: python3 pipeline/vertical_articles.py
+
       # These run after publish and never block the deploy: a failure here costs the app a
       # section, where a failure that stopped the job would cost it the articles too. Each
       # depends on the one before — injuries needs the schedule's team names, and the dossier
@@ -98,13 +105,14 @@ jobs:
         run: python3 pipeline/gameweek.py
 
       # continue-on-error reports a step's conclusion as success no matter how it exited, so a
-      # run's green check says nothing about whether these four worked. Without this the only
+      # run's green check says nothing about whether these steps worked. Without this the only
       # symptom of a broken step is data that silently stops changing.
       - name: Report step outcomes
         if: always()
         run: |
           fail=0
-          for step in "schedule:${{ steps.schedule.outcome }}" \
+          for step in "verticals:${{ steps.verticals.outcome }}" \
+                      "schedule:${{ steps.schedule.outcome }}" \
                       "handles:${{ steps.handles.outcome }}" \
                       "injuries:${{ steps.injuries.outcome }}" \
                       "dossier:${{ steps.dossier.outcome }}"; do

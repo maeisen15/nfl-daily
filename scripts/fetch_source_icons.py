@@ -28,6 +28,10 @@ import yaml
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "pipeline"))
+
+import verticals  # noqa: E402
+
 CONFIG = ROOT / "config" / "sources.yaml"
 OUT_DIR = ROOT / "web" / "icons" / "sources"
 SIZE = 96
@@ -58,11 +62,12 @@ def main() -> int:
     with ThreadPoolExecutor(max_workers=8) as pool:
         results = list(pool.map(lambda s: (s["id"], fetch_icon(s)), sources))
 
+    wanted = {s["id"] for s in sources if s.get("icon") is not False}
     ok = [sid for sid, path in results if path]
     for sid, path in results:
-        print(f"  {'ok  ' if path else 'MISS'} {sid}")
-    print(f"\n{len(ok)}/{len(results)} icons written")
-    missing = [sid for sid, path in results if not path]
+        print(f"  {'ok  ' if path else 'MISS' if sid in wanted else 'skip'} {sid}")
+    print(f"\n{len(ok)}/{len(wanted)} icons written")
+    missing = [sid for sid, path in results if not path and sid in wanted]
     if missing:
         print("Add an icon_url: in config/sources.yaml for: " + ", ".join(missing))
     return 0
@@ -89,10 +94,18 @@ def collect_sources(config: dict) -> list[dict]:
     add((team.get("primary") or {}).get("news_sources"))
     for rival in team.get("rivals") or []:
         add(rival.get("news_sources"))
+    for vertical in verticals.FLAT:
+        add(verticals.news_sources(vertical))
     return out
 
 
 def fetch_icon(source: dict) -> Path | None:
+    # `icon: false` is for a publisher with no mark of its own — a Substack that never set one
+    # serves Substack's logo, and two such sources would then look identical in the list. The
+    # lettered badge the app falls back to tells them apart; a shared logo does not.
+    if source.get("icon") is False:
+        (OUT_DIR / f"{source['id']}.png").unlink(missing_ok=True)
+        return None
     site = source.get("url") or source.get("rss_url") or ""
     if not site:
         return None

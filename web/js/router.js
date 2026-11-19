@@ -11,10 +11,18 @@ const listeners = new Set();
 
 let known = [];       // vertical codes, in config order
 let active = null;    // the one a route without a vertical belongs to
+let homes = {};       // vertical code -> the view it opens on
 
-export function setVerticals(codes, activeCode) {
+/* `homeViews` maps each vertical to its first tab. Most open on the feed, but a vertical with
+ * no accounts to follow has no Tweets tab, and landing it on an empty feed would look broken. */
+export function setVerticals(codes, activeCode, homeViews = {}) {
   known = codes.slice();
   active = known.includes(activeCode) ? activeCode : known[0] || null;
+  homes = { ...homeViews };
+}
+
+export function homeView(code = active) {
+  return homes[code] || "tweets";
 }
 
 export function setActiveVertical(code) {
@@ -35,11 +43,11 @@ export function parse() {
   const vertical = known.includes(parts[0]) ? parts.shift() : active;
   const route = (name, extra) => ({ name, vertical, params, ...extra });
 
-  if (!parts.length) return route("tweets");
+  if (!parts.length) return route(homeView(vertical));
   if (parts[0] === "tweet" && parts[1]) return route("tweet", { id: parts[1] });
   if (parts[0] === "author" && parts[1]) return route("author", { handle: parts[1] });
   if (VIEWS.includes(parts[0])) return route(parts[0]);
-  return route("tweets");
+  return route(homeView(vertical));
 }
 
 export function go(hash, { replace = false } = {}) {

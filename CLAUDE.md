@@ -19,9 +19,14 @@ worker/        Cloudflare Worker + D1: polls twitterapi.io, serves /tweets, /usa
 pipeline/      hourly fetch of articles, schedule, practice reports, the game-week dossier
 scripts/       verify_handles, fetch_source_icons, fetch_team_logos, check_allowlist, verify_deploy
 web/           the app: vanilla ES modules, no framework, no build step
-config/sources.yaml   the single source of truth for every source, handle and beat writer
+config/sources.yaml   football: the single source of truth for every source, handle and beat writer
+config/sources.<vertical>.yaml   the same for each other vertical (politics, ai)
 prompts/digest.md     what the daily brief agent writes
 ```
+
+Football is the only vertical with teams and a season. Every other one is a flat list of
+handles and article feeds, declared once in `pipeline/verticals.py`; its articles are fetched by
+`pipeline/vertical_articles.py`.
 
 Three data paths, deliberately separate. Tweets come live from the Worker. Articles, schedule
 and the dossier are rebuilt hourly by GitHub Actions into `web/data/*.json`. The written briefs
@@ -36,15 +41,17 @@ a fetch, ask what it looks like when it returns nothing, and make that visible.
 
 **Verify, don't assume.** Run the thing and read the output. `scripts/verify_handles.py` before
 syncing handles, `scripts/check_allowlist.py` before pushing a new domain, `python3
-tests/test_publish.py` for the pipeline.
+tests/test_publish.py` and `python3 tests/test_verticals.py` for the pipeline.
 
 **Cost is small but real.** twitterapi.io bills per request and per tweet returned, and
 publishes no billing API — the usage view computes it. Roughly $3.60/month at 41 handles. Flag
 any spend before incurring it, however small. Everything else — ESPN, NFL.com, Open-Meteo,
 Cloudflare — is free.
 
-**Handles are configuration, not code.** Edit `config/sources.yaml`, then
-`python3 pipeline/tweets.py --mode sync-handles`. The YAML alone does nothing.
+**Handles are configuration, not code.** Edit the vertical's sources file, then
+`python3 pipeline/tweets.py --mode sync-handles`. The YAML alone does nothing. The hourly run
+syncs too, so an enabled handle that reaches `main` starts being polled, and billed, within the
+hour.
 
 **The Worker is deployed by hand** (`cd worker && npx wrangler deploy`); the web app deploys on
 push to `main`. D1 migrations are applied with
