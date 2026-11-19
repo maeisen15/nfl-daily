@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS handles (
   scope        TEXT NOT NULL,            -- BAL | national | rivals | elections | ...
   vertical     TEXT NOT NULL DEFAULT 'nfl',  -- which feed this handle belongs to
   feed_only    INTEGER NOT NULL DEFAULT 0,
+  poll_minutes INTEGER,                  -- NULL rides the waking-hours cadence
   updated_at   TEXT NOT NULL
 );
 

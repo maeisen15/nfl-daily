@@ -170,19 +170,22 @@ async function syncHandles(env, handles) {
     if (!handle) continue;
     stmts.push(
       env.DB.prepare(
-        `INSERT INTO handles (handle, display_name, scope, vertical, feed_only, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO handles (handle, display_name, scope, vertical, feed_only, poll_minutes, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(handle) DO UPDATE SET
            display_name = excluded.display_name,
            scope        = excluded.scope,
            vertical     = excluded.vertical,
            feed_only    = excluded.feed_only,
+           poll_minutes = excluded.poll_minutes,
            updated_at   = excluded.updated_at`
       ).bind(handle,
              // Empty is meaningful: it means "use the name the account publishes", which is
              // right for anyone whose real name isn't worth hard-coding in a config file.
              typeof h.display_name === "string" ? h.display_name : "",
-             h.scope || "national", h.vertical || "nfl", h.feed_only ? 1 : 0, now)
+             h.scope || "national", h.vertical || "nfl", h.feed_only ? 1 : 0,
+             // Null means the waking-hours cadence; see dueTiers.
+             Number(h.poll_minutes) > 0 ? Math.round(Number(h.poll_minutes)) : null, now)
     );
   }
   if (stmts.length) await env.DB.batch(stmts);
@@ -294,9 +297,14 @@ async function upsertAll(env, rawTweets, source) {
  * casually.
  *
  * Second, the per-request floor is what multiplies, not the handle count: one request covers
- * every handle for the same ~26 credits. So the cheapest arrangement is one query at the
- * fastest cadence any handle needs — splitting the feed into fast and slow tiers would mean
- * asking more often in total and paying the floor more times, for slower tweets. Don't tier.
+ * about 21 handles for the same ~26 credits. So within a feed the cheapest arrangement is one
+ * cadence for everything — giving some of football's handles a slower tier would add queries
+ * and pay the floor more times, for slower tweets.
+ *
+ * A whole vertical is different. Its handles fill queries of their own either way, so polling
+ * those queries less often pays the floor fewer times and costs nothing else: the tweets are
+ * billed once whenever they are collected. That is what `poll_minutes` on a handle is for, and
+ * it is set per vertical in the pipeline's sources files, never per account.
  *
  * For reference, the filter-rule webhook this replaced billed 15 credits per rule per check
  * whether or not anything matched: 43,200 credits/day, ~$12.87/month of empty polling. The
@@ -343,27 +351,66 @@ function easternParts(date) {
   return { hour: Number(parts.hour) % 24, minute: Number(parts.minute) };
 }
 
+/* Which handles are due on this tick, grouped by how often they are polled.
+ *
+ * A handle with no `poll_minutes` rides the waking-hours cadence above. One with it set is
+ * polled that often instead, and never faster than the hour allows, so a 30-minute vertical
+ * stays at 30 through the day and the shoulders alike. Each group is queried separately and
+ * keeps its own watermark: a slow group that borrowed the fast group's would resume from five
+ * minutes ago and lose everything posted in the half hour before that. */
+function dueTiers(rows, cadence, hour, minute) {
+  const groups = new Map();   // poll_minutes (0 = the waking-hours cadence) -> handles
+  for (const row of rows) {
+    if (!row.handle) continue;
+    const own = Number(row.poll_minutes) > 0 ? Number(row.poll_minutes) : 0;
+    if (!groups.has(own)) groups.set(own, []);
+    groups.get(own).push(row.handle);
+  }
+  const clock = hour * 60 + minute;
+  const due = [];
+  for (const [own, handles] of groups) {
+    const every = Math.max(cadence, own);
+    if (clock % every === 0) due.push({ minutes: own, every, handles });
+  }
+  return due;
+}
+
 async function poll(env, now) {
   const { hour, minute } = easternParts(now);
   const cadence = pollCadenceMinutes(hour);
   if (cadence === 0) return;
   // The cron ticks every 5 minutes; a 15-minute cadence uses every third tick.
-  if (minute % cadence !== 0) return;
+  const onCadence = minute % cadence === 0;
 
   if (!env.TWITTERAPI_IO_KEY) {
+    if (!onCadence) return;
     return await recordPoll(env, now, { ok: false, error: "TWITTERAPI_IO_KEY not set" });
   }
 
-  const rows = await env.DB.prepare("SELECT handle FROM handles ORDER BY handle").all();
-  const handles = (rows.results || []).map(r => r.handle).filter(Boolean);
-  if (!handles.length) {
+  const rows = await env.DB.prepare(
+    "SELECT handle, poll_minutes FROM handles ORDER BY handle").all();
+  const all = (rows.results || []).filter(r => r.handle);
+  if (!all.length) {
+    if (!onCadence) return;
     // The handles table is synced by the pipeline; empty means that sync never ran, and
     // polling with no handles would just burn the per-request floor for nothing.
     return await recordPoll(env, now, { ok: false, error: "no handles in D1 — run tweets.py --mode sync-handles" });
   }
 
-  const since = await pollWatermark(env, now);
-  const queries = buildPollQueries(handles, since);
+  const tiers = dueTiers(all, cadence, hour, minute);
+  if (!tiers.length) return;
+  for (const tier of tiers) {
+    tier.since = await pollWatermark(env, now, tier.minutes);
+    tier.queries = buildPollQueries(tier.handles, tier.since);
+  }
+  const handleCount = tiers.reduce((n, t) => n + t.handles.length, 0);
+  const queryCount = tiers.reduce((n, t) => n + t.queries.length, 0);
+  // The oldest window asked for, which is the one a reader of /health needs to see.
+  const since = tiers.map(t => t.since).reduce((a, b) => (a < b ? a : b));
+  const tierDetail = tiers.map(t => ({
+    every_minutes: t.every, handles: t.handles.length, queries: t.queries.length,
+    since: t.since.toISOString(),
+  }));
 
   let returned = 0, pages = 0, written = 0, truncated = false;
   const links = new Set();
@@ -374,7 +421,7 @@ async function poll(env, now) {
   // number for the day would lose that, so each request's own credits are added up here.
   let credits = 0;
   try {
-    for (const query of queries) {
+    for (const query of tiers.flatMap(t => t.queries)) {
       let cursor = "", page = 0;
       while (page < POLL_MAX_PAGES) {
         const body = await searchPage(env, query, cursor);
@@ -403,7 +450,7 @@ async function poll(env, now) {
     console.error("poll failed", err && err.stack ? err.stack : String(err));
     return await recordPoll(env, now, {
       ok: false, error: String(err && err.message ? err.message : err),
-      since: since.toISOString(), queries: queries.length, returned, written,
+      since: since.toISOString(), queries: queryCount, returned, written, tiers: tierDetail,
     });
   }
 
@@ -416,7 +463,7 @@ async function poll(env, now) {
   }
 
   if (truncated) console.warn(`poll hit the ${POLL_MAX_PAGES}-page cap; window not fully covered`);
-  console.log(`poll: ${handles.length} handles, ${queries.length} query(s), ${pages} page(s), ` +
+  console.log(`poll: ${handleCount} handles, ${queryCount} query(s), ${pages} page(s), ` +
               `${returned} returned, ${written} written, since ${since.toISOString()}`);
 
   // Never let bookkeeping lose an ingest that already succeeded and was already paid for.
@@ -428,19 +475,24 @@ async function poll(env, now) {
 
   await recordPoll(env, now, {
     ok: true, cadence_minutes: cadence, since: since.toISOString(),
-    handles: handles.length, queries: queries.length, pages,
+    handles: handleCount, queries: queryCount, pages,
     returned, written, truncated, link_cards: cards,
-    credits,
+    credits, tiers: tierDetail,
   });
 }
 
-/* Where to resume from: the newest tweet already stored, less a small overlap. Keeping the
- * watermark in the store rather than in a counter means a missed run self-heals — the next
- * poll simply asks for a wider window — and a restored Worker resumes exactly where it left
- * off. Floored so it can never become an unbounded crawl. */
-async function pollWatermark(env, now) {
+/* Where to resume from: the newest tweet already stored for this group of handles, less a
+ * small overlap. Keeping the watermark in the store rather than in a counter means a missed
+ * run self-heals — the next poll simply asks for a wider window — and a restored Worker
+ * resumes exactly where it left off. Floored so it can never become an unbounded crawl, which
+ * is also what a group with nothing stored yet starts from. */
+async function pollWatermark(env, now, minutes) {
   const floor = new Date(now.getTime() - POLL_MAX_LOOKBACK_H * 3600_000);
-  const row = await env.DB.prepare("SELECT MAX(published_at) AS newest FROM tweets").first();
+  const row = await env.DB.prepare(
+    `SELECT MAX(t.published_at) AS newest
+       FROM tweets t JOIN handles h ON h.handle = LOWER(t.author_handle)
+      WHERE COALESCE(h.poll_minutes, 0) = ?`
+  ).bind(minutes).first();
   if (!row || !row.newest) return floor;
   const newest = new Date(row.newest);
   if (isNaN(newest)) return floor;

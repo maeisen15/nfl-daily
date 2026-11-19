@@ -156,7 +156,8 @@ def load_handles() -> list[dict[str, Any]]:
 
     out: list[dict[str, Any]] = []
 
-    def add(tw: dict[str, Any], scope: str, vertical: str = "nfl") -> None:
+    def add(tw: dict[str, Any], scope: str, vertical: str = "nfl",
+            poll_minutes: int | None = None) -> None:
         if not tw.get("enabled", True):
             return
         out.append({
@@ -167,6 +168,9 @@ def load_handles() -> list[dict[str, Any]]:
             "scope": scope,
             "vertical": vertical,
             "feed_only": bool(tw.get("feed_only", False)),
+            # None rides the Worker's waking-hours cadence. Set per vertical, never per
+            # account: a slower tier only saves money when it empties whole queries.
+            "poll_minutes": poll_minutes,
         })
 
     for tier in ("twitter_news_handles", "twitter_analysis_handles"):
@@ -185,8 +189,9 @@ def load_handles() -> list[dict[str, Any]]:
 
     # Other verticals are flat lists of handles — no teams, no rivals, no season.
     for v in verticals.FLAT:
+        every = verticals.load_sources(v).get("poll_minutes")
         for tw in verticals.handles(v):
-            add(tw, v["scope"]["code"], v["code"])
+            add(tw, v["scope"]["code"], v["code"], int(every) if every else None)
 
     opponent = upcoming_opponent(primary_code)
     writer = (cfg.get("team_beat_writers") or {}).get(opponent) if opponent else None

@@ -313,6 +313,10 @@ bar, the handle sync, the article fetch and the icon fetch all read that one lis
 opens on its first tab, and one with no enabled handles has no Tweets tab until it gets one.
 Its articles come from `pipeline/vertical_articles.py`, which keeps two weeks by default
 because newsletters publish weekly. A newsletter with no logo of its own takes `icon: false`.
+`poll_minutes:` in the sources file checks that vertical's accounts that often instead of every
+five minutes — AI runs at 30 — which pays the per-request floor far less often for the queries
+its handles fill. It is per vertical, never per account, and it needs the Worker deployed with
+migration 0005 to take effect; until then the accounts ride the normal cadence.
 
 **A rival team:** add it under `team_coverage.rivals` with a beat writer, and its team code
 reaches the schedule tab through `config.json` without a code change.

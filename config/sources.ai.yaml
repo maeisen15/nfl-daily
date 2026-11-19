@@ -29,69 +29,56 @@
 # Newsletters publish weekly, so the Articles tab looks back further than football's does.
 article_window_days: 14
 
+# How often these accounts are checked. This is an argument that unfolds over days, not a
+# trade deadline, and a half-hour poll costs about a sixth of the five-minute one.
+poll_minutes: 30
+
 twitter_handles:
   # ---- Reporters ----
   - handle: "ShakeelHashim"
     name: "Shakeel Hashim"
-    enabled: false
   - handle: "KelseyTuoc"
     name: "Kelsey Piper"
-    enabled: false
   - handle: "kevinroose"
     name: "Kevin Roose"
-    enabled: false
 
   # ---- Policy insiders ----
   - handle: "deanwball"
     name: "Dean Ball"
-    enabled: false
   - handle: "hlntnr"
     name: "Helen Toner"
-    enabled: false
   - handle: "Miles_Brundage"
     name: "Miles Brundage"
-    enabled: false
   - handle: "jackclarkSF"
     name: "Jack Clark"
-    enabled: false
 
   # ---- Analysts ----
   - handle: "TheZvi"
     name: "Zvi Mowshowitz"
-    enabled: false
   - handle: "binarybits"
     name: "Timothy B. Lee"
-    enabled: false
   - handle: "dwarkesh_sp"
     name: "Dwarkesh Patel"
-    enabled: false
 
   # ---- Forecasters and measurement ----
   - handle: "DKokotajlo"
     name: "Daniel Kokotajlo"
-    enabled: false
   - handle: "METR_Evals"
     name: "METR"
-    enabled: false
   - handle: "EpochAIResearch"
     name: "Epoch AI"
-    enabled: false
 
   # ---- Skeptics ----
   - handle: "random_walker"
     name: "Arvind Narayanan"
-    enabled: false
   - handle: "GaryMarcus"
     name: "Gary Marcus"
-    enabled: false
 
   # ---- China and economics ----
-  - handle: "jordanschnyc"
+  - handle: "jordanschneider"
     name: "Jordan Schneider"
-    enabled: false
   - handle: "Noahpinion"
     name: "Noah Smith"
-    enabled: false
 
 news_sources:
   - id: ai_transformer
