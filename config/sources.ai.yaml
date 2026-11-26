@@ -71,14 +71,10 @@ twitter_handles:
   # ---- Skeptics ----
   - handle: "random_walker"
     name: "Arvind Narayanan"
-  - handle: "GaryMarcus"
-    name: "Gary Marcus"
 
   # ---- China and economics ----
   - handle: "jordanschneider"
     name: "Jordan Schneider"
-  - handle: "Noahpinion"
-    name: "Noah Smith"
 
 news_sources:
   - id: ai_transformer

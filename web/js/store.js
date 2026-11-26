@@ -18,7 +18,8 @@ export const store = {
   newestSeen: null,
 
   offline: false,
-  scrollPositions: {}, // route key -> scrollY, so Back returns to where you were
+  scrollPositions: {}, // route key -> a place (see lib/place.js), so Back returns to it
+  heldTweet: null,     // the post open in the detail view, kept so a reload can redraw it
 };
 
 export function subscribe(fn) {
@@ -69,6 +70,7 @@ export function findTweet(id) {
       || store.pending.find(t => t.id === id)
       || (likes.all().find(e => e.id === id) || {}).tweet
       || embedded(id)
+      || (store.heldTweet && store.heldTweet.id === id ? store.heldTweet : null)
       || null;
 }
 

@@ -22,14 +22,16 @@ The cadence follows waking hours rather than running flat out, and that is a cos
 understanding before changing it. twitterapi.io bills **~26 credits per request plus 15 credits
 per tweet returned** (measured; 100,000 credits = $1.00). Two consequences shape the design:
 
-- **One request covers every handle**, so the per-request floor is paid once no matter how many
-  accounts are watched. Splitting the feed into fast and slow tiers would mean paying that floor
-  more times for slower tweets — so everything shares one query at one cadence.
-- **The `since_time` watermark is the cost control**, not an optimisation. Without it each poll
-  re-returns tweets already stored and pays 15 credits for each of them again.
+- **One request covers about 21 handles**, so the per-request floor is paid per query, not per
+  account. Splitting a feed's handles into fast and slow tiers would mean more queries paying
+  that floor for slower tweets — so a feed shares one cadence. A whole vertical can run slower
+  (`poll_minutes`), because its handles fill queries of their own either way.
+- **The `since_time` window is the cost control**, not an optimisation. Without it each poll
+  re-returns tweets already stored and pays 15 credits for each of them again. Each query
+  resumes from the newest post it has already seen and stops when it reaches it.
 
-Polling only while Matt is awake costs about **$1.17/month**. Nothing is lost overnight: the 8am
-poll's watermark reaches back to the last tweet stored and pulls the whole night in one request.
+The Usage screen in the app shows what this actually costs, by day and by account. Nothing is
+lost overnight: the 8am poll reaches back to the last post seen and pulls the whole night in.
 
 This replaced a twitterapi.io webhook, which cost about **$19/month** — filter rules bill 15
 credits per rule per check whether or not anything matches, and the 255-character cap on a rule

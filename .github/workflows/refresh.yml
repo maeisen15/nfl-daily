@@ -41,11 +41,11 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      url: ${{ steps.deployment.outputs.page_url || steps.redeploy.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -126,9 +126,22 @@ jobs:
           [ "$fail" = 0 ] && echo "All data steps succeeded." >> "$GITHUB_STEP_SUMMARY"
           exit 0
 
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: web
+
+      # The deploy looks up the bundle uploaded one step earlier, and now and then GitHub
+      # answers that there is no such bundle — it is there, the listing is just behind. That
+      # failed a run in three with every data step green, and a failed run is an email. So a
+      # first failure is not the run's result: wait for the listing to catch up and deploy
+      # once more. Only the second attempt can fail the job.
       - id: deployment
-        uses: actions/deploy-pages@v4
+        continue-on-error: true
+        uses: actions/deploy-pages@v5
+      - name: Wait before deploying again
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 45
+      - id: redeploy
+        if: steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@v5

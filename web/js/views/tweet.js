@@ -39,6 +39,8 @@ export function tweetRow(item, opts = {}) {
 
   const row = el("article", {
     class: `tweet${inThread ? " in-thread" : ""}${threadTail ? " thread-tail" : ""}`,
+    // What the scroll position is remembered against: a row, not a pixel offset.
+    dataset: { id: item.id, at: item.published_at || "" },
     onclick: (e) => {
       if (e.target.closest("a, button, video, .quoted, .media-item")) return;
       go(`/tweet/${item.id}`);
@@ -56,7 +58,7 @@ export function tweetRow(item, opts = {}) {
 
   row.appendChild(el("div", { class: "tweet-body" },
     nameRow(subject),
-    textBlock(subject),
+    textBlock(subject, item.quoted || subject.quoted),
     mediaBlock(subject.media),
     quotedCard(item.quoted || subject.quoted),
     actionsRow(item, subject),
@@ -115,23 +117,40 @@ export function displayName(name) {
   return String(name || "").replace(/\s*\(.*$/, "").trim() || String(name || "");
 }
 
-/* Twitter renders a tweet's own text with entities linkified and the t.co stub for its card,
- * quote or media removed — the stub is a duplicate of something already on screen. */
-function textBlock(subject) {
-  const text = resolveStubs(subject);
+/* Twitter renders a tweet's own text with entities linkified and the t.co stub for its quote or
+ * media removed — the stub is a duplicate of something already on screen. */
+function textBlock(subject, quoted) {
+  const text = resolveStubs(subject, quoted);
   if (!text) return null;
   return el("div", { class: "tweet-text clamped" }, ...linkify(text));
 }
 
-/* Twitter leaves the author's own link in the text, as the shortened display URL, and strips
- * only the stubs standing in for something already on screen — the media, or the quoted post.
- * The link stubs come first and line up with `links` in order, so the first `links.length` of
- * them expand and anything past that is one of those duplicates and goes. */
-function resolveStubs(subject) {
+/* Every link in a tweet's text arrives as a t.co stub. The author's own links come first and
+ * line up with `links` in order, so those expand to the real address. What is left over stands
+ * for the media or the quoted post, which Twitter appends at the end and which are already on
+ * screen — so one trailing stub goes for each of those actually being shown, and no more.
+ *
+ * Anything still unaccounted for stays, as the link it is. It is a destination this app has no
+ * richer way to show — an X article, a broadcast, a quoted post that never arrived — and
+ * stripping it is how a post that was only a link used to render as an empty row. */
+const STUB = /https:\/\/t\.co\/[A-Za-z0-9]+/g;
+
+export function resolveStubs(subject, quoted = subject.quoted) {
+  // A legacy `RT @x: …` string is cut mid-word, and the cut can land inside a stub.
+  const text = String(subject.text || "").replace(/\s*https:\/\/t\.co\/\w*…$/, "…");
   const links = subject.links || [];
-  let i = 0;
-  return String(subject.text || "")
-    .replace(/\s*https:\/\/t\.co\/\S+/g, () => (i < links.length ? ` ${links[i++]}` : ""))
+  const stubs = [...new Set(text.match(STUB) || [])];
+  const onScreen = ((subject.media || []).length ? 1 : 0) + (quoted ? 1 : 0);
+  const spare = stubs.slice(links.length);
+  const hidden = new Set(onScreen ? spare.slice(-onScreen) : []);
+  const expanded = new Map(stubs.slice(0, links.length).map((stub, i) => [stub, links[i]]));
+
+  return text
+    .replace(new RegExp(`\\s*${STUB.source}`, "g"), (match) => {
+      const stub = match.trim();
+      if (hidden.has(stub)) return "";
+      return match.replace(stub, expanded.get(stub) || stub);
+    })
     .trim();
 }
 
@@ -142,10 +161,17 @@ export function linkify(text) {
   const pattern = /(https?:\/\/[^\s]+)|(^|[^\w])([@#][A-Za-z0-9_]+)/g;
   let last = 0, match;
   while ((match = pattern.exec(text)) !== null) {
-    const [, url, lead, token] = match;
+    let [, url, lead, token] = match;
     const start = match.index + (url ? 0 : (lead || "").length);
     if (start > last) out.push(text.slice(last, start));
     if (url) {
+      // A link at the end of a sentence is followed by the sentence's punctuation, not made
+      // of it. Hand that back to the text and let the next match start after the address.
+      const tail = /[.,;:!?…'"”’)\]]+$/.exec(url);
+      if (tail) {
+        url = url.slice(0, -tail[0].length);
+        pattern.lastIndex -= tail[0].length;
+      }
       const href = safeUrl(url);
       out.push(href
         ? el("a", { href, target: "_blank", rel: "noopener", text: prettyUrl(url),
@@ -158,7 +184,7 @@ export function linkify(text) {
       out.push(el("a", { href, target: "_blank", rel: "noopener", text: token,
                          onclick: (e) => e.stopPropagation() }));
     }
-    last = match.index + match[0].length;
+    last = pattern.lastIndex;
   }
   if (last < text.length) out.push(text.slice(last));
   return out;
@@ -356,7 +382,7 @@ export function tweetDetail(item) {
     ),
   ));
 
-  const text = resolveStubs(subject);
+  const text = resolveStubs(subject, item.quoted || subject.quoted);
   if (text) body.appendChild(el("div", { class: "detail-text" }, ...linkify(text)));
 
   const media = mediaBlock(subject.media);

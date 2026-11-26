@@ -45,7 +45,6 @@ separators, no card borders.
           at center for Ravens in Week 1.
           [media]
           [quoted tweet card]
-          [link preview card]
           💬 3    🔁 10    ♥ 314    ıl 14K              𝕏
 ```
 
@@ -59,9 +58,10 @@ separators, no card borders.
 
 ### Retweets
 
-A retweet renders as the **original** post — the original author's avatar, name, full text and
-counts — under a small `🔁 X reposted` line. Never Twitter's truncated `RT @handle: …` string,
-which is only a fallback for rows stored before the Worker captured the retweeted object.
+A retweet renders as the **original** post — the original author's avatar, name, full text,
+counts and whatever post it quotes — under a small `🔁 X reposted` line. Never Twitter's
+truncated `RT @handle: …` string, which is only a fallback for a payload that arrived without
+the retweeted object.
 
 ### Quoted tweets
 
@@ -75,11 +75,13 @@ Consecutive posts by one author in one conversation group as a single feed item.
 render inline and connected by the vertical line down the avatar column; longer threads show
 the opening two plus `Show this thread (N)`.
 
-### Link preview cards
+### Links
 
-A tweet linking to an article shows the destination's `og:image` and `og:title` as a card with
-the domain beneath. This is a primary way articles get found, so it matters as much as anything
-else in the feed.
+An author's link stays in the sentence it was written in, shown as the shortened address, the
+way Twitter shows it. The only links taken out of the text are the ones standing for something
+already on screen — the media, or the quoted post. A link the app has no richer way to show,
+such as an X article or a broadcast, stays as a link rather than vanishing: a post that is only
+a link must never render as an empty row.
 
 ### Engagement row
 
@@ -102,8 +104,18 @@ ceiling is the Worker's own five-minute poll of twitterapi.io.
 ### Detail view
 
 Tapping a row opens `#/tweet/<id>`: the tweet larger, its quoted post tappable into its own
-detail, the full thread below, the engagement row, and a back control that restores the exact
-scroll position. Scroll position is preserved across every navigation.
+detail, the full thread below, the engagement row, and a back control that returns to the
+place in the feed it was opened from.
+
+### Keeping your place
+
+A place in the feed is a post, not a pixel offset: the row at the top of the screen and how far
+it sat from the edge. That survives everything that changes the height of the feed above it —
+new posts folded in while a tweet was open, images loading — where a remembered offset would
+point at whatever is that far down now. Places are also kept through a reload, because iOS
+discards a backgrounded web app's page under memory pressure and loads it afresh on return;
+the app pages back to the remembered post rather than starting at the top. Closing the app
+forgets them.
 
 ## Rivals
 
@@ -261,7 +273,7 @@ web/
                  #/schedule, #/brief, #/settings
     views/       feed, tweet, detail, articles, schedule, brief, dossier,
                  settings, liked, lightbox, chrome
-    lib/         dom, icons, time, likes
+    lib/         dom, icons, time, likes, place
   sw.js          data network-first; shell stale-while-revalidate
 ```
 
@@ -281,17 +293,33 @@ because they answer when to be in front of a television.
 ### Tweet data
 
 The Worker captures what twitterapi.io sends and the app renders: `author_avatar`, the full
-`retweeted` object, `conversation_id` / `reply_to_id`, the four engagement counts, and `links`.
-A `link_cards` table caches `url → {title, image, domain}`, fetched once at ingest with
-HTMLRewriter. Open Graph URLs are HTML-entity-decoded before use — publishers routinely escape
-the ampersands in them, and image CDNs reject the result.
+`retweeted` object with the post it quotes, `conversation_id` / `reply_to_id`, the four
+engagement counts, and `links`.
+
+### The poll
+
+Handles are packed into as few search queries as the API's length limit allows, and each query
+is read independently. It resumes from the newest post the API has returned for its own
+handles (`handles.seen_through`) and moves that mark only once its window has been read to the
+end, so a failed request costs a retry and nothing else.
+
+Reading a window to the end is the subtle part. A page holds up to 20 tweets but often fewer
+with more still to come, and the API's `has_next_page` stays true on a last page — so neither
+a short page nor that flag says the results are finished. The window is therefore opened just
+before a post already seen, and reaching that post is the proof. Treating a short page as the
+end is the mistake to never make again: it silently dropped the older half of every busy
+window.
+
+Every poll is written to `poll_log` and kept two weeks. `/health` reports how many of the last
+day's polls failed and the most recent failure, because the last poll alone says nothing about
+the afternoon before it.
 
 Retention is seven days. Replies to accounts other than the author's own thread are excluded at
 ingest: showing a reply without its parent is confusing, and fetching parents costs 15 credits
 each.
 
 Rows written before a field existed keep NULLs and render without it. Nothing backfills
-automatically — the poll watermark only reaches forward — so the store heals as rows age out.
+automatically — the poll only reaches forward — so the store heals as rows age out.
 `pipeline/tweets.py --mode search --since-hours N` forces it, at 15 credits per tweet returned.
 
 ## Adding things

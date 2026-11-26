@@ -3,8 +3,7 @@
  * This Worker both fetches tweets and serves them.
  *
  *   scheduled()  -> polls twitterapi.io Advanced Search on a waking-hours cadence and writes
- *                   what it finds, then resolves any new outbound links to preview cards.
- *                   This is the ingest path.
+ *                   what it finds. This is the ingest path.
  *   POST /push   -> the pipeline pushes handle->scope routing here (and may push tweets).
  *   POST /ingest -> dormant. The twitterapi.io webhook used to deliver here; its filter rules
  *                   are deactivated. See the cost note on the poll section below before
@@ -23,13 +22,6 @@ const MAX_LIMIT = 1000;
 const DEFAULT_HOURS = 24 * RETENTION_DAYS;
 const DEFAULT_PAGE = 200;
 
-// Link previews. Bounded per poll so an ingest burst can't become a fetch storm, and a short
-// timeout so a slow publisher never holds up the poll that found the link. A link that failed
-// is retried once a week rather than on every poll forever.
-const LINK_CARDS_PER_POLL = 12;
-const LINK_FETCH_TIMEOUT_MS = 4000;
-const LINK_CARD_RETRY_DAYS = 7;
-
 /* twitterapi.io pricing, in credits, where 100,000 credits = $1.00. Measured against the
  * billing endpoint: a request returning nothing costs ~26, and a request returning 20 tweets
  * costs 300 — exactly 20 x 15, with no separate base added on top. So the floor is what an
@@ -45,7 +37,6 @@ const CREDITS_PER_USD = 100_000;
 function requestCredits(tweets) {
   return Math.max(CREDITS_PER_REQUEST_FLOOR, tweets * CREDITS_PER_TWEET);
 }
-const LINK_CARD_KEEP_DAYS = 30;
 
 // Cron strings, mirrored from wrangler.toml. scheduled() routes on these.
 const CRON_POLL  = "*/5 * * * *";
@@ -97,11 +88,9 @@ async function prune(env) {
   const res = await env.DB.prepare("DELETE FROM tweets WHERE published_at < ?").bind(cutoff).run();
   console.log(`pruned ${res.meta?.changes ?? 0} tweets older than ${cutoff}`);
 
-  // Link cards outlive the tweets that referenced them. Nothing older than this window can
-  // still be on screen, and a URL that comes back is simply fetched again.
-  const cards = await env.DB.prepare("DELETE FROM link_cards WHERE fetched_at < ?")
-    .bind(isoDaysAgo(LINK_CARD_KEEP_DAYS)).run();
-  console.log(`pruned ${cards.meta?.changes ?? 0} link cards`);
+  const polls = await env.DB.prepare("DELETE FROM poll_log WHERE at < ?")
+    .bind(isoDaysAgo(POLL_LOG_KEEP_DAYS)).run();
+  console.log(`pruned ${polls.meta?.changes ?? 0} poll log rows`);
 }
 
 /* ---------- write paths ---------- */
@@ -138,8 +127,7 @@ async function push(request, env) {
   // The only writer that still pushes tweets here is the manual backfill in tweets.py; routine
   // ingest is the Worker's own poll. A sync-handles call carries no tweets at all.
   const source = "search";
-  const { written, links } = await upsertAll(env, raw, source);
-  if (links.length) await refreshLinkCards(env, links);
+  const { written } = await upsertAll(env, raw, source);
 
   // A manual backfill is bought from the same account as the poll, so it belongs in the same
   // ledger. The caller reports its own request count because only it knows how many pages it
@@ -210,10 +198,8 @@ async function syncHandles(env, handles) {
   return stmts.length;
 }
 
-/* Returns { written, links } — the link set feeds the preview-card fetcher, which runs after
- * the write rather than inside it so a slow publisher can never stall an ingest. */
 async function upsertAll(env, rawTweets, source) {
-  if (!rawTweets.length) return { written: 0, links: [] };
+  if (!rawTweets.length) return { written: 0 };
 
   // Only store handles we actually track — a rule edit upstream must not silently widen the app.
   const known = await env.DB.prepare("SELECT handle FROM handles").all();
@@ -222,7 +208,6 @@ async function upsertAll(env, rawTweets, source) {
   const now = new Date().toISOString();
   const cutoff = isoDaysAgo(RETENTION_DAYS);
   const stmts = [];
-  const links = new Set();
   for (const raw of rawTweets) {
     const t = normalize(raw, source);
     if (!t) continue;
@@ -231,10 +216,6 @@ async function upsertAll(env, rawTweets, source) {
     // A reply to someone else is half a conversation the reader can't see, and beat writers
     // generate a lot of it. Replies to self are thread continuations and do belong.
     if (t.is_reply && !t.is_self_thread) continue;
-    // A quoted or retweeted post's own links get preview cards too — often the retweet IS the
-    // article link, and the wrapper carries none of its own.
-    for (const u of [].concat(t.links, (t.quoted && t.quoted.links) || [],
-                              (t.retweeted && t.retweeted.links) || [])) links.add(u);
     stmts.push(
       env.DB.prepare(
         `INSERT INTO tweets (id, author_handle, author_name, author_avatar, text, url,
@@ -276,9 +257,9 @@ async function upsertAll(env, rawTweets, source) {
              t.richness, source, now)
     );
   }
-  if (!stmts.length) return { written: 0, links: [...links] };
+  if (!stmts.length) return { written: 0 };
   await env.DB.batch(stmts);
-  return { written: stmts.length, links: [...links] };
+  return { written: stmts.length };
 }
 
 /* ---------- poll: the ingest path ---------- */
@@ -293,8 +274,8 @@ async function upsertAll(env, rawTweets, source) {
  *
  * First, tweets are billed once each on delivery, so `since_time` is not an optimisation —
  * it is the whole cost control. A poll without it re-returns the same 20 tweets every time
- * and bills 15 credits for each of them, every five minutes. Never widen the watermark
- * casually.
+ * and bills 15 credits for each of them, every five minutes. Never widen a window casually,
+ * and never leave a mark standing still while its query keeps succeeding.
  *
  * Second, the per-request floor is what multiplies, not the handle count: one request covers
  * about 21 handles for the same ~26 credits. So within a feed the cheapest arrangement is one
@@ -311,23 +292,25 @@ async function upsertAll(env, rawTweets, source) {
  * rules in pipeline/rules.py are deactivated. Reactivating them re-arms that meter.
  */
 
-// The API silently returns zero tweets — no error, no message — once a query passes roughly
-// 512 characters. That failure is indistinguishable from a quiet news day, so the builder
-// splits well short of the cliff and never emits a query that could trip it.
+// The API rejects a query longer than 512 characters, and has at times answered one with zero
+// tweets and no error instead. Either failure is indistinguishable from a quiet news day, so
+// the builder splits well short of the cliff and never emits a query that could trip it.
 const POLL_QUERY_CHARS = 500;
-// Bounds a backfill after a long gap; 12 pages x 20 tweets = 240. Each page costs, so this is
-// a spend ceiling as much as a loop guard.
-const POLL_MAX_PAGES = 12;
+// Pages one query may take in one poll; 25 x 20 = 500 tweets. It only binds after a long gap,
+// and what lies past it is lost, so it is set well above a normal overnight.
+const POLL_MAX_PAGES = 25;
+// Pages the whole poll may take. A Worker invocation is allowed a fixed number of outbound
+// requests and dies without a word when it runs out, so the poll stops itself first.
+const POLL_PAGE_BUDGET = 40;
 // Re-ask for a sliver we already hold. The search index can surface posts out of order, and a
 // handful of duplicate tweets is far cheaper than a hole in the feed.
 const POLL_OVERLAP_SEC = 120;
 // Floor on the watermark, so a long outage can't trigger an unbounded — and expensive — crawl.
 const POLL_MAX_LOOKBACK_H = 26;
-// Advanced Search returns 20 per page, and keeps reporting has_next_page even when the page it
-// just handed back was partial — so trusting that flag alone costs one empty request, billed at
-// the ~26-credit floor, on almost every poll. Measured: it roughly doubled the running cost.
-// A short page means the end of the results.
-const SEARCH_PAGE_SIZE = 20;
+// One more try for a request the API fumbled. It documents the occasional 503 as retryable and
+// unbilled, and a single retry is the difference between a blip and a failed poll.
+const SEARCH_RETRY_MS = 1500;
+const POLL_LOG_KEEP_DAYS = 14;
 
 /* Waking-hours cadence, in Eastern. Cloudflare crons are UTC-only and cannot express this, so
  * the cron fires every 5 minutes year-round and the gate lives here instead — which also means
@@ -335,7 +318,7 @@ const SEARCH_PAGE_SIZE = 20;
  * makes no API call and costs nothing.
  *
  * Overnight is dark on purpose: nothing is lost, because the 8am poll's watermark reaches back
- * to the last tweet stored and pulls the whole night in one request. */
+ * to the last tweet seen and pulls the whole night in. */
 function pollCadenceMinutes(hourET) {
   if (hourET >= 9 && hourET < 19) return 5;                      // 9am–7pm, the hours that matter
   if (hourET === 8 || (hourET >= 19 && hourET < 23)) return 15;  // 8–9am and 7–11pm, shoulders
@@ -355,26 +338,31 @@ function easternParts(date) {
  *
  * A handle with no `poll_minutes` rides the waking-hours cadence above. One with it set is
  * polled that often instead, and never faster than the hour allows, so a 30-minute vertical
- * stays at 30 through the day and the shoulders alike. Each group is queried separately and
- * keeps its own watermark: a slow group that borrowed the fast group's would resume from five
- * minutes ago and lose everything posted in the half hour before that. */
+ * stays at 30 through the day and the shoulders alike. */
 function dueTiers(rows, cadence, hour, minute) {
-  const groups = new Map();   // poll_minutes (0 = the waking-hours cadence) -> handles
+  const groups = new Map();   // poll_minutes (0 = the waking-hours cadence) -> handle rows
   for (const row of rows) {
     if (!row.handle) continue;
     const own = Number(row.poll_minutes) > 0 ? Number(row.poll_minutes) : 0;
     if (!groups.has(own)) groups.set(own, []);
-    groups.get(own).push(row.handle);
+    groups.get(own).push(row);
   }
   const clock = hour * 60 + minute;
   const due = [];
-  for (const [own, handles] of groups) {
+  for (const [own, members] of groups) {
     const every = Math.max(cadence, own);
-    if (clock % every === 0) due.push({ minutes: own, every, handles });
+    if (clock % every === 0) due.push({ minutes: own, every, rows: members });
   }
   return due;
 }
 
+/* One poll: every due query, each with its own window and its own outcome.
+ *
+ * The queries are independent on purpose. Each resumes from the newest post the API has shown
+ * for its own handles, and only moves that mark when it has read its window to the end — so a
+ * query that fails, or a poll that dies halfway, costs nothing but a retry. Sharing one mark
+ * across queries is how a failure in the third used to erase its handles' posts for good: the
+ * first two had already stored something newer, and the next poll resumed from there. */
 async function poll(env, now) {
   const { hour, minute } = easternParts(now);
   const cadence = pollCadenceMinutes(hour);
@@ -388,7 +376,7 @@ async function poll(env, now) {
   }
 
   const rows = await env.DB.prepare(
-    "SELECT handle, poll_minutes FROM handles ORDER BY handle").all();
+    "SELECT handle, poll_minutes, seen_through FROM handles ORDER BY handle").all();
   const all = (rows.results || []).filter(r => r.handle);
   if (!all.length) {
     if (!onCadence) return;
@@ -399,133 +387,165 @@ async function poll(env, now) {
 
   const tiers = dueTiers(all, cadence, hour, minute);
   if (!tiers.length) return;
-  for (const tier of tiers) {
-    tier.since = await pollWatermark(env, now, tier.minutes);
-    tier.queries = buildPollQueries(tier.handles, tier.since);
-  }
-  const handleCount = tiers.reduce((n, t) => n + t.handles.length, 0);
-  const queryCount = tiers.reduce((n, t) => n + t.queries.length, 0);
-  // The oldest window asked for, which is the one a reader of /health needs to see.
-  const since = tiers.map(t => t.since).reduce((a, b) => (a < b ? a : b));
-  const tierDetail = tiers.map(t => ({
-    every_minutes: t.every, handles: t.handles.length, queries: t.queries.length,
-    since: t.since.toISOString(),
-  }));
+  const jobs = tiers.flatMap(tier => buildPollJobs(tier, now));
 
-  let returned = 0, pages = 0, written = 0, truncated = false;
-  const links = new Set();
-  // Billed per tweet returned, so a handle's share of the bill is its share of these — counted
-  // before dedupe, because a tweet already stored was still paid for again.
-  const byHandle = new Map();
-  // Cost is per request, and a request that comes back nearly empty still pays the floor. One
-  // number for the day would lose that, so each request's own credits are added up here.
-  let credits = 0;
-  try {
-    for (const query of tiers.flatMap(t => t.queries)) {
-      let cursor = "", page = 0;
-      while (page < POLL_MAX_PAGES) {
-        const body = await searchPage(env, query, cursor);
-        const tweets = Array.isArray(body.tweets) ? body.tweets : [];
-        returned += tweets.length;
-        credits += requestCredits(tweets.length);
-        for (const t of tweets) {
-          const h = String(t?.author?.userName || "").toLowerCase();
-          if (h) byHandle.set(h, (byHandle.get(h) || 0) + 1);
-        }
-        page += 1; pages += 1;
-        if (tweets.length) {
-          const res = await upsertAll(env, tweets, "poll");
-          written += res.written;
-          for (const u of res.links) links.add(u);
-        }
-        cursor = body.next_cursor || "";
-        if (!body.has_next_page || !cursor || !tweets.length) break;
-        // The load-bearing one: stop on a partial page rather than paying for the empty page
-        // that has_next_page would otherwise send us to fetch.
-        if (tweets.length < SEARCH_PAGE_SIZE) break;
-      }
-      if (page >= POLL_MAX_PAGES) truncated = true;
+  const tally = {
+    pages: 0, returned: 0, written: 0, credits: 0,
+    // Billed per tweet returned, so a handle's share of the bill is its share of these —
+    // counted before dedupe, because a tweet already stored was still paid for again.
+    byHandle: new Map(),
+  };
+  const errors = [];
+  let truncated = false;
+  for (const job of jobs) {
+    try {
+      const result = await runPollJob(env, job, tally);
+      if (result.truncated) truncated = true;
+      await markSeen(env, result.seen);
+    } catch (err) {
+      // This query's mark stays where it was, so the next poll asks for the same window
+      // again. The rest of the queries still run: one bad request must not cost the others.
+      console.error("poll query failed", err && err.stack ? err.stack : String(err));
+      errors.push(`${job.handles[0]}…${job.handles[job.handles.length - 1]}: ` +
+                  String(err && err.message ? err.message : err));
     }
-  } catch (err) {
-    console.error("poll failed", err && err.stack ? err.stack : String(err));
-    return await recordPoll(env, now, {
-      ok: false, error: String(err && err.message ? err.message : err),
-      since: since.toISOString(), queries: queryCount, returned, written, tiers: tierDetail,
+  }
+
+  const since = jobs.map(j => j.since).reduce((a, b) => (a < b ? a : b));
+  if (truncated) console.warn("poll hit a page cap; a window was not fully covered");
+  console.log(`poll: ${jobs.reduce((n, j) => n + j.handles.length, 0)} handles, ` +
+              `${jobs.length} query(s), ${tally.pages} page(s), ${tally.returned} returned, ` +
+              `${tally.written} written, ${errors.length} failed`);
+
+  // Whatever came back was paid for, whether or not the poll as a whole succeeded. And never
+  // let bookkeeping lose an ingest that already happened.
+  try {
+    await recordUsage(env, now, {
+      polls: 1, requests: tally.pages, tweets: tally.returned, byHandle: tally.byHandle,
     });
-  }
-
-  // After the write, never during it: a preview fetch that hangs must not cost us the tweets.
-  let cards = 0;
-  try {
-    cards = await refreshLinkCards(env, [...links]);
-  } catch (err) {
-    console.error("link cards failed", err && err.stack ? err.stack : String(err));
-  }
-
-  if (truncated) console.warn(`poll hit the ${POLL_MAX_PAGES}-page cap; window not fully covered`);
-  console.log(`poll: ${handleCount} handles, ${queryCount} query(s), ${pages} page(s), ` +
-              `${returned} returned, ${written} written, since ${since.toISOString()}`);
-
-  // Never let bookkeeping lose an ingest that already succeeded and was already paid for.
-  try {
-    await recordUsage(env, now, { polls: 1, requests: pages, tweets: returned, byHandle });
   } catch (err) {
     console.error("usage record failed", err && err.stack ? err.stack : String(err));
   }
 
   await recordPoll(env, now, {
-    ok: true, cadence_minutes: cadence, since: since.toISOString(),
-    handles: handleCount, queries: queryCount, pages,
-    returned, written, truncated, link_cards: cards,
-    credits, tiers: tierDetail,
+    ok: errors.length === 0,
+    ...(errors.length ? { error: errors.join(" | ") } : {}),
+    cadence_minutes: cadence,
+    // The oldest window asked for, which is the one a reader of /health needs to see.
+    since: since.toISOString(),
+    handles: jobs.reduce((n, j) => n + j.handles.length, 0),
+    queries: jobs.length, failed_queries: errors.length,
+    pages: tally.pages, returned: tally.returned, written: tally.written,
+    truncated, credits: tally.credits,
+    tiers: tiers.map(t => ({ every_minutes: t.every, handles: t.rows.length })),
   });
 }
 
-/* Where to resume from: the newest tweet already stored for this group of handles, less a
- * small overlap. Keeping the watermark in the store rather than in a counter means a missed
- * run self-heals — the next poll simply asks for a wider window — and a restored Worker
- * resumes exactly where it left off. Floored so it can never become an unbounded crawl, which
- * is also what a group with nothing stored yet starts from. */
-async function pollWatermark(env, now, minutes) {
+/* A tier's handles, packed into as few queries as the length budget allows, each with the
+ * window it should ask for. Grouping is purely by length, never by scope: the Worker routes on
+ * the author's handle, so a query may freely span tabs, and fewer queries means the
+ * per-request floor is paid fewer times.
+ *
+ * A query resumes from the newest post the API has returned for any of its handles — its
+ * anchor — less a small overlap. Every handle in a query is read through the same poll, so the
+ * newest of them is how far all of them have been read. The anchor is floored so a long gap
+ * can never become an unbounded crawl, which is also where a query with nothing seen starts. */
+function buildPollJobs(tier, now) {
   const floor = new Date(now.getTime() - POLL_MAX_LOOKBACK_H * 3600_000);
-  const row = await env.DB.prepare(
-    `SELECT MAX(t.published_at) AS newest
-       FROM tweets t JOIN handles h ON h.handle = LOWER(t.author_handle)
-      WHERE COALESCE(h.poll_minutes, 0) = ?`
-  ).bind(minutes).first();
-  if (!row || !row.newest) return floor;
-  const newest = new Date(row.newest);
-  if (isNaN(newest)) return floor;
-  const since = new Date(newest.getTime() - POLL_OVERLAP_SEC * 1000);
-  return since < floor ? floor : since;
-}
+  // Sized for the suffix every query will carry; a Unix timestamp stays ten digits until 2286.
+  const suffixFor = (since) => ` include:nativeretweets since_time:${Math.floor(since.getTime() / 1000)}`;
+  const budget = POLL_QUERY_CHARS - suffixFor(floor).length - 2;  // the wrapping parens
 
-/* Pack handles into as few queries as the length budget allows. Grouping is purely by length,
- * never by scope: the Worker routes on the author's handle, so a query may freely span tabs,
- * and fewer queries means the per-request floor is paid fewer times. */
-function buildPollQueries(handles, since) {
-  const suffix = ` include:nativeretweets since_time:${Math.floor(since.getTime() / 1000)}`;
-  const budget = POLL_QUERY_CHARS - suffix.length - 2;  // the wrapping parens
-  const queries = [];
+  const groups = [];
   let group = [], length = 0;
-  for (const handle of handles) {
-    const term = `from:${handle}`;
+  for (const row of tier.rows) {
+    const term = `from:${row.handle}`;
     // A single handle wider than the whole budget can't be expressed; dropping it is bad, but
-    // emitting an over-length query that silently returns nothing for *every* handle is worse.
+    // emitting an over-length query that fails for *every* handle is worse.
     if (term.length > budget) {
-      console.warn(`poll: handle ${handle} too long for a query budget of ${budget}; skipped`);
+      console.warn(`poll: handle ${row.handle} too long for a query budget of ${budget}; skipped`);
       continue;
     }
     const addition = group.length ? term.length + 4 : term.length;  // " OR "
     if (group.length && length + addition > budget) {
-      queries.push(`(${group.join(" OR ")})${suffix}`);
+      groups.push(group);
       group = []; length = 0;
     }
-    group.push(term);
+    group.push(row);
     length += group.length === 1 ? term.length : term.length + 4;
   }
-  if (group.length) queries.push(`(${group.join(" OR ")})${suffix}`);
-  return queries;
+  if (group.length) groups.push(group);
+
+  return groups.map(members => {
+    const newest = members.map(r => r.seen_through || "").reduce((a, b) => (a > b ? a : b), "");
+    const seen = newest ? new Date(newest) : null;
+    const anchor = seen && !isNaN(seen) && seen > floor ? seen : null;
+    const since = anchor ? new Date(anchor.getTime() - POLL_OVERLAP_SEC * 1000) : floor;
+    const handles = members.map(r => r.handle);
+    return {
+      handles, since,
+      anchor: anchor ? anchor.toISOString() : null,
+      query: `(${handles.map(h => `from:${h}`).join(" OR ")})${suffixFor(since)}`,
+    };
+  });
+}
+
+/* Read one query's window, newest first, until it is known to be finished.
+ *
+ * Knowing that is the hard part. A page holds up to 20 tweets but routinely fewer with more
+ * still to come — the API filters ads out after it has counted — and `has_next_page` stays true
+ * on a last page. Stopping at the first short page is what this used to do, and it silently
+ * dropped everything older in any window that needed a second page: a busy half hour, a game,
+ * the whole night before an 8am poll. Following `has_next_page` instead would pay the
+ * per-request floor for an empty page on nearly every poll.
+ *
+ * The anchor settles it for free. The window is deliberately opened just before a post already
+ * seen, so that post comes back at the old end of the results, and reaching it — or anything
+ * as old — proves the window has been read through. Only a query with no anchor in reach has
+ * to pay for the empty page that says so.
+ *
+ * Returns the newest post seen per handle, for the caller to record once the window is done.
+ * A window cut short by a page cap is recorded too: the pages come newest first, so holding
+ * the mark back would re-buy the same newest pages on every poll and never reach the rest. */
+async function runPollJob(env, job, tally) {
+  const seen = new Map();   // handle -> newest published_at returned
+  let cursor = "", page = 0, finished = false;
+  while (page < POLL_MAX_PAGES && tally.pages < POLL_PAGE_BUDGET) {
+    const body = await searchPage(env, job.query, cursor);
+    const tweets = Array.isArray(body.tweets) ? body.tweets : [];
+    page += 1; tally.pages += 1;
+    tally.returned += tweets.length;
+    tally.credits += requestCredits(tweets.length);
+
+    let reachedAnchor = false;
+    for (const t of tweets) {
+      const h = String(t?.author?.userName || "").toLowerCase();
+      const at = toIso(t?.createdAt || t?.created_at);
+      if (h) tally.byHandle.set(h, (tally.byHandle.get(h) || 0) + 1);
+      if (h && at && at > (seen.get(h) || "")) seen.set(h, at);
+      if (job.anchor && at && at <= job.anchor) reachedAnchor = true;
+    }
+    if (tweets.length) tally.written += (await upsertAll(env, tweets, "poll")).written;
+
+    const next = body.next_cursor || "";
+    if (!tweets.length || reachedAnchor || !body.has_next_page || !next || next === cursor) {
+      finished = true;
+      break;
+    }
+    cursor = next;
+  }
+  return { seen, truncated: !finished };
+}
+
+/* Move each handle's mark forward to the newest post the API returned for it — stored or not,
+ * because a reply that is filtered out was still read, and a mark that ignored it would ask
+ * for it, and pay for it, on every poll after. Never backward. */
+async function markSeen(env, seen) {
+  if (!seen.size) return;
+  await env.DB.batch([...seen].map(([handle, at]) => env.DB.prepare(
+    `UPDATE handles SET seen_through = ?
+      WHERE handle = ? AND (seen_through IS NULL OR seen_through < ?)`
+  ).bind(at, handle, at)));
 }
 
 async function searchPage(env, query, cursor) {
@@ -533,20 +553,34 @@ async function searchPage(env, query, cursor) {
   url.searchParams.set("query", query);
   url.searchParams.set("queryType", "Latest");
   if (cursor) url.searchParams.set("cursor", cursor);
-  const res = await fetch(url.toString(), { headers: { "X-API-Key": env.TWITTERAPI_IO_KEY } });
+  const ask = () => fetch(url.toString(), { headers: { "X-API-Key": env.TWITTERAPI_IO_KEY } });
+  let res = await ask();
+  if (res.status === 429 || res.status >= 500) {
+    await new Promise(resolve => setTimeout(resolve, SEARCH_RETRY_MS));
+    res = await ask();
+  }
   if (!res.ok) throw new Error(`advanced_search returned ${res.status}`);
   return await res.json();
 }
 
-// A poll that finds nothing and a poll that quietly broke look identical from the outside, so
-// every run leaves a record and /health reports the last one.
+/* A poll that finds nothing and a poll that quietly broke look identical from the outside, so
+ * every run leaves a record. /health reports the last one, and the log behind it is what shows
+ * a bad afternoon after the fact: the last poll alone is overwritten five minutes later, which
+ * is how three days of failing polls once left no trace of why. */
 async function recordPoll(env, now, detail) {
   if (!detail.ok) console.error("poll not ok:", JSON.stringify(detail));
-  const value = JSON.stringify({ at: now.toISOString(), ...detail });
-  await env.DB.prepare(
-    `INSERT INTO meta (key, value, updated_at) VALUES ('last_poll', ?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
-  ).bind(value, now.toISOString()).run();
+  const at = now.toISOString();
+  const value = JSON.stringify({ at, ...detail });
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO meta (key, value, updated_at) VALUES ('last_poll', ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+    ).bind(value, at),
+    env.DB.prepare(
+      `INSERT INTO poll_log (at, ok, detail) VALUES (?, ?, ?)
+       ON CONFLICT(at) DO UPDATE SET ok = excluded.ok, detail = excluded.detail`
+    ).bind(at, detail.ok ? 1 : 0, value),
+  ]);
 }
 
 /* ---------- usage ---------- */
@@ -790,150 +824,6 @@ function str(v) {
   return v == null ? "" : String(v);
 }
 
-/* ---------- link preview cards ---------- */
-
-/* A tweet linking to an article shows the article's own headline and image, the way Twitter
- * does — for this reader that card is a primary way articles get found, so it is worth a
- * fetch. Cloudflare's outbound requests are free, and each URL is fetched exactly once and
- * then served from D1 forever after. */
-async function refreshLinkCards(env, urls) {
-  // This poll's own new links come first, and whatever room is left goes to links still
-  // carrying no card. Without that top-up the retry window below is a window onto nothing: a
-  // URL is only ever offered here by the poll that first saw its tweet, so one failed attempt
-  // — a slow host, a bot wall we have since learned how to get past — was permanent.
-  const queue = [...new Set(urls)];
-  if (queue.length < LINK_CARDS_PER_POLL) {
-    for (const url of await uncardedLinks(env, LINK_CARDS_PER_POLL * 4)) {
-      if (!queue.includes(url)) queue.push(url);
-    }
-  }
-  if (!queue.length) return 0;
-
-  // Anything already resolved is done. A previous failure is retried, but only weekly — a
-  // paywall or a dead host would otherwise be re-fetched on every poll for as long as the
-  // tweet stands.
-  const retryBefore = isoDaysAgo(LINK_CARD_RETRY_DAYS);
-  const done = new Set();
-  // D1 caps bound parameters per statement. A poll after the overnight gap carries a whole
-  // night of links, so this has to chunk rather than bind them all at once.
-  const CHUNK = 90;
-  for (let i = 0; i < queue.length; i += CHUNK) {
-    const slice = queue.slice(i, i + CHUNK);
-    const known = await env.DB.prepare(
-      `SELECT url, status, fetched_at FROM link_cards
-        WHERE url IN (${slice.map(() => "?").join(",")})`
-    ).bind(...slice).all();
-    for (const r of known.results || []) {
-      if (r.status === "ok" || r.fetched_at > retryBefore) done.add(r.url);
-    }
-  }
-
-  const todo = queue.filter(u => !done.has(u)).slice(0, LINK_CARDS_PER_POLL);
-  if (!todo.length) return 0;
-
-  const cards = await Promise.all(todo.map(fetchOpenGraph));
-  const now = new Date().toISOString();
-  await env.DB.batch(cards.map(c => env.DB.prepare(
-    `INSERT INTO link_cards (url, title, description, image, domain, status, fetched_at)
-     VALUES (?,?,?,?,?,?,?)
-     ON CONFLICT(url) DO UPDATE SET
-       title = excluded.title, description = excluded.description, image = excluded.image,
-       domain = excluded.domain, status = excluded.status, fetched_at = excluded.fetched_at`
-  ).bind(c.url, c.title, c.description, c.image, c.domain, c.status, now)));
-
-  return cards.length;
-}
-
-/* The first link of every tweet still inside the retention window, newest first. The caller
- * drops the ones that already have a card or failed too recently to try again, so this walks
- * steadily backwards through the backlog a dozen at a time rather than retrying the same few. */
-async function uncardedLinks(env, limit) {
-  const rows = await env.DB.prepare(
-    `SELECT links FROM tweets
-      WHERE links IS NOT NULL AND links != '[]' AND published_at >= ?
-      ORDER BY published_at DESC LIMIT 400`
-  ).bind(isoDaysAgo(RETENTION_DAYS)).all();
-
-  const out = [];
-  for (const r of rows.results || []) {
-    const first = safeParse(r.links, [])[0];
-    if (typeof first === "string" && first && !out.includes(first)) out.push(first);
-    if (out.length >= limit) break;
-  }
-  return out;
-}
-
-/* Reads the destination's Open Graph tags with HTMLRewriter, which streams the response rather
- * than buffering a whole article page into memory. A failure is recorded, not thrown: a link
- * we can't read renders as a plain link rather than blocking anything. */
-async function fetchOpenGraph(url) {
-  const card = { url, title: null, description: null, image: null, domain: safeHost(url), status: "error" };
-  try {
-    const res = await fetch(url, {
-      redirect: "follow",
-      signal: AbortSignal.timeout(LINK_FETCH_TIMEOUT_MS),
-      headers: {
-        // A self-identifying bot string is turned away by a quarter of the publishers linked
-        // here — Substack and the Advance papers both answer it with a 403, so the tweet loses
-        // its card. This is one request per URL, ever, for the page a tap would open anyway.
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 " +
-                      "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml",
-      },
-      cf: { cacheTtl: 3600, cacheEverything: true },
-    });
-    if (!res.ok || !/text\/html/i.test(res.headers.get("content-type") || "")) return card;
-
-    const found = {};
-    let titleText = "";
-    const meta = (el) => {
-      const key = String(el.getAttribute("property") || el.getAttribute("name") || "").toLowerCase();
-      const content = el.getAttribute("content");
-      if (!content) return;
-      if (key === "og:title" || key === "twitter:title") found.title ??= content;
-      else if (key === "og:description" || key === "twitter:description") found.description ??= content;
-      else if (key === "og:image" || key === "og:image:secure_url" || key === "twitter:image")
-        found.image ??= content;
-      else if (key === "og:site_name") found.site ??= content;
-    };
-
-    await new HTMLRewriter()
-      .on("meta", { element: meta })
-      .on("title", { text(t) { if (titleText.length < 300) titleText += t.text; } })
-      .transform(res)
-      .arrayBuffer();   // drain the stream so the handlers actually run
-
-    const finalUrl = res.url || url;
-    card.title = clean(found.title || titleText, 200);
-    card.description = clean(found.description, 300);
-    card.image = absoluteUrl(found.image, finalUrl);
-    card.domain = found.site ? clean(found.site, 60) : safeHost(finalUrl) || card.domain;
-    card.status = (card.title || card.image) ? "ok" : "empty";
-    return card;
-  } catch {
-    return card;
-  }
-}
-
-function clean(text, max) {
-  if (!text) return null;
-  const s = decodeEntities(String(text)).replace(/\s+/g, " ").trim();
-  if (!s) return null;
-  return s.length > max ? s.slice(0, max - 1).trimEnd() + "\u2026" : s;
-}
-
-/* Publishers serve og:image as an absolute URL, a protocol-relative one, or a site-root path —
- * and very often with its query string HTML-escaped, because the tag was written by a template
- * engine that escapes every attribute. A `&amp;` left in the URL breaks image CDNs that parse
- * their own query string (the Banner's resizer answers 400), so decode before resolving. */
-function absoluteUrl(value, base) {
-  if (!value) return null;
-  try {
-    const resolved = new URL(decodeEntities(String(value)).trim(), base);
-    return resolved.protocol === "https:" || resolved.protocol === "http:" ? resolved.toString() : null;
-  } catch { return null; }
-}
-
 /* ---------- read path ---------- */
 
 async function getTweets(request, env, url, origin) {
@@ -1004,8 +894,6 @@ async function getTweets(request, env, url, origin) {
     quoted: safeParse(r.quoted, null),
   }));
 
-  await attachLinkCards(env, items);
-
   const last = page.length ? page[page.length - 1] : null;
   const newest = items.length ? items[0].published_at : null;
   return json(
@@ -1017,41 +905,6 @@ async function getTweets(request, env, url, origin) {
     // Short edge cache: keeps a burst of app opens off D1 without making tweets feel stale.
     { "Cache-Control": "public, max-age=30" }
   );
-}
-
-/* Resolves each item's first link to its cached preview card. One query for the whole page
- * rather than one per tweet. A link with no card yet renders as a plain link until the next
- * poll fetches it. */
-async function attachLinkCards(env, items) {
-  const wanted = new Map();   // url -> the items waiting on it
-  const want = (url, target) => {
-    if (!url) return;
-    if (!wanted.has(url)) wanted.set(url, []);
-    wanted.get(url).push(target);
-  };
-  for (const it of items) {
-    want(it.links[0], it);
-    if (it.quoted && it.quoted.links) want(it.quoted.links[0], it.quoted);
-    if (it.retweeted && it.retweeted.links) want(it.retweeted.links[0], it.retweeted);
-  }
-  if (!wanted.size) return;
-
-  const urls = [...wanted.keys()];
-  // D1 caps bound parameters per statement; chunk rather than risk a silent truncation.
-  const CHUNK = 90;
-  for (let i = 0; i < urls.length; i += CHUNK) {
-    const slice = urls.slice(i, i + CHUNK);
-    const rows = await env.DB.prepare(
-      `SELECT url, title, description, image, domain FROM link_cards
-        WHERE status = 'ok' AND url IN (${slice.map(() => "?").join(",")})`
-    ).bind(...slice).all();
-    for (const r of rows.results || []) {
-      for (const target of wanted.get(r.url) || []) {
-        target.link_card = { url: r.url, title: r.title, description: r.description,
-                             image: r.image, domain: r.domain };
-      }
-    }
-  }
 }
 
 /* The cursor is the sort key itself, not an opaque token, so it stays valid across deploys and
@@ -1078,8 +931,11 @@ async function health(env, origin) {
   ).all();
   const handles = await env.DB.prepare("SELECT COUNT(*) AS n FROM handles").first();
   const lastPoll = await env.DB.prepare("SELECT value FROM meta WHERE key = 'last_poll'").first();
-  const cards = await env.DB.prepare(
-    "SELECT COUNT(*) AS n, SUM(status = 'ok') AS ok FROM link_cards"
+  const day = await env.DB.prepare(
+    `SELECT COUNT(*) AS polls, SUM(ok = 0) AS failed FROM poll_log WHERE at >= ?`
+  ).bind(isoDaysAgo(1)).first();
+  const lastFailure = await env.DB.prepare(
+    "SELECT detail FROM poll_log WHERE ok = 0 ORDER BY at DESC LIMIT 1"
   ).first();
   const rich = await env.DB.prepare(
     "SELECT SUM(author_avatar IS NOT NULL) AS n FROM tweets"
@@ -1090,7 +946,6 @@ async function health(env, origin) {
     // How far the store has healed since the rich-tweet fields shipped: rows written before
     // then have no avatar and render without one until they age out.
     tweets_with_avatar: rich?.n ?? 0,
-    link_cards: { total: cards?.n ?? 0, ok: cards?.ok ?? 0 },
     handles: handles?.n ?? 0,
     newest_tweet_at: row?.newest ?? null,
     last_ingest_at: row?.last_ingest ?? null,
@@ -1098,6 +953,10 @@ async function health(env, origin) {
     retention_days: RETENTION_DAYS,
     // The ingest path's own report card — see recordPoll().
     last_poll: safeParse(lastPoll?.value, null),
+    // One good poll says nothing about the hundred before it. A day in which some polls
+    // failed is a day with holes in the feed, and this is the only place that shows.
+    polls_24h: { total: day?.polls ?? 0, failed: day?.failed ?? 0 },
+    last_failed_poll: safeParse(lastFailure?.detail, null),
   }, 200, env, origin);
 }
 
@@ -1172,8 +1031,8 @@ function normalize(raw, source) {
 /* A tweet referenced by another tweet — quoted or retweeted. Both render as a tweet in their
  * own right (the retweet as the main row, the quote as a nested card), so both carry the same
  * fields, including the counts, which on a retweet belong to the original and not to the
- * near-always-zero wrapper. */
-function extractTweetRef(t) {
+ * near-always-zero wrapper, and the post that one quotes in turn. */
+function extractTweetRef(t, depth = 0) {
   if (!t || typeof t !== "object") return null;
   const author = t.author || t.user || {};
   const handle = String(author.userName || author.username || author.screen_name || "");
@@ -1192,6 +1051,9 @@ function extractTweetRef(t) {
     media,
     links: extractLinks(t),
     ...pickCounts(t),
+    // A reposted quote-post is only half there without the post it quotes. One level and no
+    // further: a quote inside a quote is not shown by Twitter either.
+    quoted: depth === 0 ? extractTweetRef(t.quoted_tweet || t.quotedTweet, 1) : null,
   };
 }
 
@@ -1221,9 +1083,11 @@ function pickCounts(raw) {
   };
 }
 
-/* Outbound links, which become preview cards. t.co stubs are useless — `expanded_url` is the
- * real destination — and links back to Twitter itself are the quote-tweet and media stubs we
- * already render as their own cards. */
+/* Outbound links, in the order they appear in the text, which is the order the app relies on
+ * to put each one back where its t.co stub stands. `expanded_url` is the real destination. A
+ * link to a post on Twitter itself is left out: that is the quote or the media, which the app
+ * renders in its own right. Anything else there — an article, a broadcast — is a destination
+ * like any other. */
 function extractLinks(raw) {
   const entities = raw.entities || {};
   const urls = [].concat(entities.urls || [], (entities.url && entities.url.urls) || []);
@@ -1232,7 +1096,9 @@ function extractLinks(raw) {
     const expanded = String(u.expanded_url || u.expandedUrl || u.url || "");
     if (!/^https?:\/\//i.test(expanded)) continue;
     const host = safeHost(expanded);
-    if (!host || host === "twitter.com" || host === "x.com" || host === "t.co") continue;
+    if (!host || host === "t.co") continue;
+    const onTwitter = /(^|\.)(twitter|x)\.com$/.test(host);
+    if (onTwitter && /\/status(es)?\/\d+/.test(expanded)) continue;
     if (!out.includes(expanded)) out.push(expanded);
   }
   return out;

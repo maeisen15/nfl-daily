@@ -39,19 +39,6 @@ CREATE INDEX IF NOT EXISTS idx_tweets_published ON tweets (published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tweets_author    ON tweets (author_handle, published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_tweets_conversation ON tweets (conversation_id, published_at);
 
--- Open Graph metadata for links tweeted by the tracked handles, so a tweet linking to an
--- article renders a preview card. Keyed by the expanded URL and fetched once; `status` records
--- a failure so a dead link isn't retried on every poll forever.
-CREATE TABLE IF NOT EXISTS link_cards (
-  url         TEXT PRIMARY KEY,
-  title       TEXT,
-  description TEXT,
-  image       TEXT,
-  domain      TEXT,
-  status      TEXT NOT NULL,          -- ok | empty | error
-  fetched_at  TEXT NOT NULL
-);
-
 -- handle -> scope routing, synced from config/sources.yaml by the pipeline so the YAML stays
 -- the single source of truth and adding a handle never needs a Worker redeploy.
 CREATE TABLE IF NOT EXISTS handles (
@@ -61,6 +48,8 @@ CREATE TABLE IF NOT EXISTS handles (
   vertical     TEXT NOT NULL DEFAULT 'nfl',  -- which feed this handle belongs to
   feed_only    INTEGER NOT NULL DEFAULT 0,
   poll_minutes INTEGER,                  -- NULL rides the waking-hours cadence
+  seen_through TEXT,                     -- newest post the API has returned for this handle;
+                                         -- the poll resumes each query from the newest of these
   updated_at   TEXT NOT NULL
 );
 
@@ -73,4 +62,12 @@ CREATE TABLE IF NOT EXISTS meta (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL,           -- JSON
   updated_at TEXT NOT NULL
+);
+
+-- One row per poll, kept two weeks. `meta.last_poll` is overwritten every five minutes, so on
+-- its own it can say the poller is healthy now and nothing about the afternoon it wasn't.
+CREATE TABLE IF NOT EXISTS poll_log (
+  at     TEXT PRIMARY KEY,             -- the tick's scheduled time, ISO8601 UTC
+  ok     INTEGER NOT NULL,
+  detail TEXT NOT NULL                 -- JSON, the same record /health shows for the last poll
 );

@@ -1,11 +1,12 @@
-/* Wiring: boot, routing, scroll restoration, and the three ways the feed refreshes. */
+/* Wiring: boot, routing, keeping the reader's place, and the three ways the feed refreshes. */
 
 import { el, icon } from "./lib/dom.js";
 import * as ICON from "./lib/icons.js";
-import { store, set, mergeTweets } from "./store.js";
+import { store, set, mergeTweets, findTweet } from "./store.js";
 import { parse, go, onRoute, key as routeKey,
          setVerticals, setActiveVertical, activeVertical, homeView } from "./router.js";
 import * as data from "./data.js";
+import * as place from "./lib/place.js";
 import { initTheme, renderVerticals, renderScopes, renderTabs, renderStatus,
          scopeCodes } from "./views/chrome.js";
 import { renderFeed, watchSentinel, hydrateFeed } from "./views/feed.js";
@@ -25,8 +26,20 @@ const scopeKey = (code) => `nfl-daily.scope.${code}`;
 const LEGACY_SCOPE_KEY = "nfl-daily.scope";
 const POLL_MS = 60_000;
 const TOP_SLACK = 40;   // px from the top that still counts as "at the top"
+/* How far back to page for a place remembered from before a reload. Five pages is a thousand
+ * posts, which is most of a week; past that the top of the feed is the better answer. */
+const RESUME_MAX_PAGES = 5;
 
 let currentKey = null;
+/* Nothing is remembered until the first real screen is up: the shell paints an empty feed
+ * before the tweets arrive, and recording "the top" from that would overwrite the place a
+ * reload is about to put back. */
+let settled = false;
+
+/* The browser's own scroll restoration guesses, from outside, at what this file knows exactly.
+ * On a Back it puts the page where it was by pixel offset, before or after the view has been
+ * redrawn, and the two answers fight. */
+if ("scrollRestoration" in history) history.scrollRestoration = "manual";
 
 boot();
 
@@ -56,6 +69,15 @@ async function boot() {
   await data.selectVertical(activeVertical());
   store.scope = pickScope(data.state.vertical, params.get("scope"));
 
+  // A reload — iOS discarding the page while it was in the background, most often — comes
+  // back to the place it left rather than to the top.
+  const resumed = place.load();
+  const resuming = resumed && resumed.vertical === activeVertical() && resumed.scope === store.scope;
+  if (resuming) {
+    store.scrollPositions = resumed.positions || {};
+    store.heldTweet = resumed.detail || null;
+  }
+
   normalizeHash();
   renderVerticals(changeVertical);
   renderScopes(changeScope);
@@ -65,9 +87,12 @@ async function boot() {
   // Tweets are fetched after the first paint so the shell and the articles tab are usable
   // immediately, rather than everything waiting on the Worker.
   await loadTweets();
+  if (resuming) await pageBackTo(store.scrollPositions[`${activeVertical()}:tweets`]);
   // Every view is re-rendered, not just the feed: the app reopens on whatever URL it was left
   // on, and a detail view drawn before the tweets arrived would otherwise stay empty forever.
-  render(parse());
+  render(parse(), { resume: true });
+  settled = true;
+  remember();
 
   if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 
@@ -79,7 +104,13 @@ async function boot() {
   // so it is also when anything held during the read gets folded in.
   window.addEventListener("scroll", () => {
     if (store.pending.length && window.scrollY <= TOP_SLACK) flushPending();
+    rememberSoon();
   }, { passive: true });
+  // The last chance before the page can be discarded without another event.
+  window.addEventListener("pagehide", remember);
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") remember();
+  });
   initPullToRefresh();
   initSwipe();
   initChromeAutoHide();
@@ -87,13 +118,13 @@ async function boot() {
 
 /* ---------- routing ---------- */
 
-function render(route = parse()) {
+function render(route = parse(), { resume = false } = {}) {
   const nextKey = routeKey(route);
   // A re-render in place — more tweets paged in, held posts folded in — must not move the page.
   // Only an actual navigation banks the old position and restores the new one.
   const sameRoute = currentKey === nextKey;
-  const heldScroll = window.scrollY;
-  if (currentKey && !sameRoute) store.scrollPositions[currentKey] = heldScroll;
+  const held = place.capture(main);
+  if (currentKey && !sameRoute && settled) store.scrollPositions[currentKey] = held;
   currentKey = nextKey;
 
   renderTabs(route);
@@ -101,7 +132,12 @@ function render(route = parse()) {
 
   let view;
   switch (route.name) {
-    case "tweet":    view = renderDetail(route.id, back); break;
+    case "tweet":
+      view = renderDetail(route.id, back);
+      // Held so that a reload on this screen can still draw it: the post may sit far deeper
+      // in the feed than the first page a fresh load fetches.
+      store.heldTweet = findTweet(route.id) || store.heldTweet;
+      break;
     case "author":   view = renderAuthor(route.handle, back); break;
     case "articles": view = renderArticles(store.scope); break;
     case "schedule": view = renderSchedule(route.params); break;
@@ -118,15 +154,56 @@ function render(route = parse()) {
   if (route.name === "author") hydrateAuthor(main, route.handle);
   if (route.name === "liked") hydrateLiked(main);
 
-  if (sameRoute) {
-    window.scrollTo(0, heldScroll);
+  if (resume) {
+    place.restoreAndHold(main, store.scrollPositions[currentKey], { strict: true });
+    resetChrome();
+  } else if (sameRoute) {
+    // Redrawn under a reader who may be mid-scroll, with nothing changed above them: the
+    // same offset is the same place, and holding a row here would fight their thumb.
+    window.scrollTo(0, held.y);
   } else {
-    // A detail view opens at the top; a list returns to where it was left.
     // A detail view or a profile opens at the top; a list returns to where it was left.
     const opensAtTop = route.name === "tweet" || route.name === "author";
-    window.scrollTo(0, opensAtTop ? 0 : (store.scrollPositions[currentKey] || 0));
+    place.restoreAndHold(main, opensAtTop ? null : store.scrollPositions[currentKey]);
     // The jump is not a scroll gesture, so it must not be read as one.
     resetChrome();
+  }
+  if (settled) remember();
+}
+
+/* ---------- the reader's place, across a reload ---------- */
+
+function remember() {
+  if (!settled || !currentKey) return;
+  store.scrollPositions[currentKey] = place.capture(main);
+  place.save({
+    vertical: activeVertical(),
+    scope: store.scope,
+    positions: store.scrollPositions,
+    detail: parse().name === "tweet" ? store.heldTweet : null,
+  });
+}
+
+/* Scroll events arrive far faster than a position is worth writing down. */
+let rememberTimer = null;
+function rememberSoon() {
+  if (rememberTimer) return;
+  rememberTimer = setTimeout(() => { rememberTimer = null; remember(); }, 400);
+}
+
+/* A fresh load fetches the newest page; the place being returned to may be several pages
+ * down. Page back until the post it was anchored to is loaded, or it is clear it won't be. */
+async function pageBackTo(spot) {
+  if (!spot || !spot.id) return;
+  for (let pages = 0; pages < RESUME_MAX_PAGES; pages += 1) {
+    if (store.tweets.some(t => t.id === spot.id) || !store.cursor) return;
+    const oldest = store.tweets[store.tweets.length - 1];
+    if (spot.at && oldest && oldest.published_at < spot.at) return;   // paged past it: it is gone
+    try {
+      const page = await fetchTweets({ cursor: store.cursor });
+      set({ tweets: mergeTweets(store.tweets, page.items), cursor: page.cursor,
+            exhausted: !page.cursor || !page.items.length });
+    } catch { return; }
   }
 }
 
@@ -245,6 +322,7 @@ async function changeVertical(code) {
   // Nothing survives the switch: scroll positions, held tweets and the loaded page all belong
   // to the vertical being left.
   store.scrollPositions = {};
+  store.heldTweet = null;
   set({ tweets: [], pending: [], cursor: null, exhausted: false, newestSeen: null });
   renderVerticals(changeVertical);
   renderScopes(changeScope);
